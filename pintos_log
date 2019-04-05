@@ -1,0 +1,93 @@
+Technical: 
+  1. Interruption handler cannot sleep --> check manual in detail for interruption. 
+  2. 
+
+In task 1, when a thread is calling timer_sleep, we put it to block state to avoid scheduling.
+In order to put the pending threads back to ready state, we do checking traversal at each time interruption. 
+If the sleeping time is satisfied, unblock the sleeping thread and repush it into ready_list. 
+
+In order to implement this, we need to record the time left in each thread info struct, using 
+thread_foreach to traverse it. 
+
+Implementation list: 
+  0. block thread when it calls for sleep. Note that thread_block requires 
+     turn off interruption manually. 
+      (change timer_sleep function in timer.c)
+
+  1. add field in thread struct. 
+      (attach 'int snap_ticks' to 'thread' struct in thread.h)
+
+  2. create thread_action_func for checking routine. 
+      (append 'snap_ticks_check' thread_action_func above timer_interrupt in timer.c)
+
+  3. apply thread_foreach in timer_interruption handler. 
+      -> cheking will be performed in each timer_interruption. 
+
+  4. modify 'thread_create' in 'thread.c' to initialize 'snap_ticks'. 
+
+This will be clear and easy to implement. 
+
+fixbugs : timer_sleep could receive 0 ticks -> no sleep. 
+
+
+
+Task 2. Priority scheduling. 
+Goals:
+1. The next thread to run is chosen according to priority, both for ready_list and synch waiting list. 
+2. priority inversion. 
+3. reimplement thread_set_priority and thread_get_priority. 
+
+Analysis: 
+1. 'thread priority' is a field defined in 'struct thread'. 
+
+2. THREAD SCHEDULE : function chooses which thread to run next in 'run_queue' -- 
+    'next_thread_to_run' in 'thread.c', invoked by static 'schedule' in 'thread.c'. 
+
+3. SYNCH : understand synchornization primitives to do priority scheduling for them.
+    semaphore :
+      sema_down : decrease a positive semaphore, if not positive, wait for it (block self).
+      sema_up : increase semaphore, wake up one thread in waiting list, if any.
+
+    lock :
+      semaphore with initial value 1.
+      only the thread who is acquiring can release it.
+    
+    monitor : 
+      High-level group of data, lock, condition variable. focus on functionality. 
+      
+      Condition variable has cond_wait and cond_signal, which creates a two-level nested 
+      sleep-and-wake-up. 
+      
+      In 'cond_wait', a new zero-init sema is created to wait for an happen-once event. 
+      In 'cond_signal', one sema in CV's waiting list is picked up, and is 'up-ed', 
+      indicating the condition is satisfied, and the wake-uped thread turns to wait for the lock. 
+
+4. priority donation : 
+    priority donation happens when a thread with higher priority waits for a thread with lower 
+    priority. At this stage, H donates its priority to L. 
+    'Lock' is the only pintos synchronization primitive we are interested in. 
+    donation happens during lock-acquisition. 
+    donation needs to be nested. 
+    
+    1. When lock is acquired by one thread, impose its priority to all threads in the waiting list. 
+        --> make thread's priority a prioirty-queue of {thread_id, priority}, the thread's 
+            effective priority is its maximum value. 
+      * this method may be slow, but easy to implement. 
+
+Implementation list:
+  1. 'list_pop_priority' in list.h and list.c. It returns the list_elem with highest priority. 
+  2. For ready_list : change 'next_thread_to_run' in thread.c using list_pop_priority. 
+  3. For synchronization primitives : 
+      change 'sema_up' in synch.c using list_pop_priority.  
+      change 'cond_signal' in synch.c using list_pop_priority. 
+  4. add donate_bills (list) and base_priority to struct thread and initialize it in thread_create in 'thread.c'.
+      write function 'donate_priority' and 'withdraw_priority', which modify donate_bills and 
+      maintain correct priority. 
+
+Bugfix : 
+  1. When cur_thread yields, push it to ready_list first and then do schedule. 
+  2. If multiple threads with the same priority, do round-robin. 
+  3. A thread can set itself's base priority. If it has been donated, its effective priority is 
+      the higher of the base and the donation. 
+  4. define struct donate_bill. attach a bill-list as a thread field. 
+  5. when modify donate_bills and setup new priority, make sure INTR_OFF. I assume this has been done in synch. 
