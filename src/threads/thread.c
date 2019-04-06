@@ -204,11 +204,6 @@ thread_create (const char *name, int priority,
     Initialize task 1's snap_ticks to be 0, not in sleep state */
   t->snap_ticks = 0; 
 
-  /* Task 2
-    create donate_bills */
-  list_init (&t->donate_bills); 
-  t->base_priority = priority; 
-  
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -248,7 +243,9 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  /* Task 2 */
+  list_insert_ordered(&ready_list, &t->elem, list_less_thread_priority, NULL);
+//  list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -320,8 +317,10 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread)
+	  /* Task 2 */
+	  list_insert_ordered(&ready_list, &cur->elem, list_less_thread_priority, NULL);
+//    list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -356,33 +355,6 @@ int
 thread_get_priority (void) 
 {
   return thread_current ()->priority;
-}
-
-/* Task 2.
-  Add donator to aided's donate bills, change its priority accordingly.*/
-void 
-thread_donate_priority (struct thread *donator, struct thread *aided) {
-  list_push_back (aided->donate_bills, donator->list_elem); 
-  aided->priority = max(donator->priority, aided->priority); 
-}
-
-/* Task 2. 
-  Withdraw donaotr's donation when the lock is acquired. 
-  The lock has to be withdrawed in reverse order w.r.t acquire order, 
-  thus we effectively do pop-front. Assertion failure otherwise. */
-void 
-thread_withdraw_priority (struct thread *donator, struct thread *aided) {
-  ASSERT (!list_empty(aided->donate_bills)); 
-  ASSERT (donator->list_elem == list_pop_front(aided->donate_bills)); 
-
-  // maintain max priority
-  aided->priority = aided->base_priority; 
-  for (struct list_elem *cur = list_begin(aided->donate_bills); 
-        cur != list_end(aided->donate_bills); 
-        cur = cur->next) {
-          aided->priority = max(aided->priority, 
-                              list_entry(cur, struct thread, elem)->priority); 
-        }
 }
 
 /* Sets the current thread's nice value to NICE. */

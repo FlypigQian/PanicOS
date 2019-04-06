@@ -324,10 +324,6 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  /**
-   * Mumble : signal a condition variable is implemented 
-   * by up the semaphore associated by cond_wait -- previously downed 
-   * sema in 'cond_wait'. */
   if (!list_empty (&cond->waiters))
   	// Task 2.
     sema_up (&list_entry (list_pop_priority (&cond->waiters),

@@ -106,10 +106,7 @@ struct thread
     /* Task 1, amount of ticks remains to sleep. 0 if not in sleep state. */
     int64_t snap_ticks; 
 
-    /* Task 2. Nasted priority donation 
-      record donate_bill list as thread field to implement nested priority donation. */
-    struct list donate_bills; 
-    int base_priority; 
+    int base_priority;
   };
 
 /* If false (default), use round-robin scheduler.
@@ -142,10 +139,6 @@ void thread_foreach (thread_action_func *func, void *aux);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
-
-/* Task 2 Priority donation -> modify bills and maintain maximum priority */
-void thread_donate_priority (struct thread *donator, struct thread *aided); 
-void thread_withdraw_priority (struct thread *donator, struct thread *aided); 
 
 int thread_get_nice (void);
 void thread_set_nice (int);

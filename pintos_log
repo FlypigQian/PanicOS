@@ -1,6 +1,11 @@
-Technical: 
+Operation :
+  1. make tests/threads/alarm-single.result
+  2. pintos --gdb -s -- run alarm-zero
+  3. backtrace kernel.o 0xc00277ef
+
+Technical:
   1. Interruption handler cannot sleep --> check manual in detail for interruption. 
-  2. 
+  2.
 
 In task 1, when a thread is calling timer_sleep, we put it to block state to avoid scheduling.
 In order to put the pending threads back to ready state, we do checking traversal at each time interruption. 
