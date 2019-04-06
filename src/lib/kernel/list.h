@@ -148,10 +148,6 @@ struct list_elem *list_remove (struct list_elem *);
 struct list_elem *list_pop_front (struct list *);
 struct list_elem *list_pop_back (struct list *);
 
-/* Task 2.
- * List removal for priority scheduling. */
-struct list_elem *list_pop_priority(struct list *);
-
 /* List elements. */
 struct list_elem *list_front (struct list *);
 struct list_elem *list_back (struct list *);

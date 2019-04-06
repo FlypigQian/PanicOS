@@ -33,6 +33,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+#define MAX(a,b)  (((a)>(b))?(a):(b))
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -115,11 +117,8 @@ sema_up (struct semaphore *sema)
 
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters))
-  	// Task 2.
-    thread_unblock (list_entry (list_pop_priority (&sema->waiters),
+	  thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
-//  thread_unblock (list_entry (list_pop_front (&sema->waiters),
-//                              struct thread, elem));
 
   sema->value++;
   intr_set_level (old_level);
@@ -201,7 +200,11 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  sema_down (&lock->semaphore);
+	if (lock_try_acquire(lock)) { }
+	else {
+		lock->holder->priority = MAX (lock->holder->priority, thread_current()->priority);
+		sema_down (&lock->semaphore);
+	}
   lock->holder = thread_current ();
 }
 
@@ -236,6 +239,7 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+//  lock->holder->priority = lock->holder->base_priority;
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
@@ -325,11 +329,8 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (lock_held_by_current_thread (lock));
 
   if (!list_empty (&cond->waiters))
-  	// Task 2.
-    sema_up (&list_entry (list_pop_priority (&cond->waiters),
-                          struct semaphore_elem, elem)->semaphore);
-//	sema_up (&list_entry (list_pop_front (&cond->waiters),
-//												struct semaphore_elem, elem)->semaphore);
+		sema_up (&list_entry (list_pop_front (&cond->waiters),
+												struct semaphore_elem, elem)->semaphore);
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -346,4 +347,15 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
+}
+
+
+void
+lock_boost_holder_priority (struct lock *lock) {
+	if (list_empty(&lock->semaphore.waiters))
+		return ;
+
+	list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
+	int donate = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
+	lock->holder->priority = MAX (lock->holder->priority, donate);
 }

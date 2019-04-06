@@ -22,6 +22,8 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+#define MAX(a,b)  (((a)>(b))?(a):(b))
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -202,7 +204,11 @@ thread_create (const char *name, int priority,
 
   /* Task 1 
     Initialize task 1's snap_ticks to be 0, not in sleep state */
-  t->snap_ticks = 0; 
+  t->snap_ticks = 0;
+
+  t->base_priority = priority;
+
+  t->donate_priority = PRI_MIN;
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -349,7 +355,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+//	thread_current()->base_priority = new_priority;
+//  thread_current ()->priority = MAX (thread_current()->base_priority, thread_current()->donate_priority);
+	thread_current()->priority = new_priority;
   thread_yield ();
 }
 
@@ -508,9 +516,7 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-  	// Task 2.
-		return list_entry (list_pop_priority (&ready_list), struct thread, elem);
-//    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    return list_entry (list_pop_front (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page

@@ -275,34 +275,6 @@ list_pop_back (struct list *list)
   return back;
 }
 
-/*
- 	 Task 2.
-   Removes the element with the highest priority from
-   LIST and returns it.
-   Assertion failure if LIST is empty before removal.
-   Undefined behaviour is the list isn't of 'thread' struct.
-
-   * Since we are no longer doing generic list_elem operation
-   * but for specific thread instance, 'list_entry' macro is
-   * needed to transform list_elem into the thread it embedded in.
-   * */
-struct list_elem *
-list_pop_priority (struct list *list)
-{
-  ASSERT (!list_empty(list));
-
-  struct thread *high = list_entry (list_begin (list), struct thread, elem);
-
-  for (struct list_elem *cur = list_begin (list); cur != list_end(list); cur = cur->next) {
-  	struct thread *cur_thread = list_entry (cur, struct thread, elem);
-  	if (high->priority < cur_thread->priority)
-  		high = cur_thread;
-  }
-
-  list_remove(&high->elem);
-	return &high->elem;
-}
-
 /* Returns the front element in LIST.
    Undefined behavior if LIST is empty. */
 struct list_elem *
