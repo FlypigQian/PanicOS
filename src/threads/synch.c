@@ -206,12 +206,24 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-	if (lock_try_acquire(lock)) { }
-	else {
-		lock->holder->priority = MAX (lock->holder->priority, thread_current()->priority);
-		sema_down (&lock->semaphore);
+  /* Task 2. */
+	if (!lock_try_acquire(lock)) {
+		// wait for lock, boost locker's priority.
+		lock->holder->donate_priority = MAX (lock->holder->donate_priority, thread_current()->priority);
+		lock->holder->priority = MAX (lock->holder->priority, lock->holder->donate_priority);
+
+		sema_down(&lock->semaphore);
+		lock->holder = thread_current ();
 	}
-  lock->holder = thread_current ();
+	// manage to acquire lock. boost self's priority using locks' waiters.
+	list_push_back(&thread_current()->locks_acquired, &lock->elem);
+	if (!list_empty(&lock->semaphore.waiters)) {
+//		list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
+		int donate = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
+		struct thread *cur = thread_current();
+		cur->donate_priority = MAX (cur->donate_priority, donate);
+		cur->priority = MAX (cur->priority, cur->donate_priority);
+	}
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -246,8 +258,23 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
 
 	/* Task 2*/
-  lock->holder->donate_priority = 0;
-  lock->holder->priority = lock->holder->base_priority;
+	ASSERT(thread_current() == lock->holder);
+	struct thread *cur = thread_current();
+	list_remove(&lock->elem);
+	// recalculate this thread's priority
+	cur->priority = cur->base_priority;
+	cur->donate_priority = 0;
+
+	if (!list_empty(&cur->locks_acquired))
+		for (struct list_elem *e = list_begin(&cur->locks_acquired);
+				 e != list_end(&cur->locks_acquired); e = e->next) {
+			struct lock *lock_acq = list_entry(e, struct lock, elem);
+			if (!list_empty(&lock_acq->semaphore.waiters)) {
+				struct thread *high = list_entry(list_front(&lock_acq->semaphore.waiters), struct thread, elem);
+				cur->donate_priority = MAX (cur->donate_priority, high->priority);
+			}
+		}
+	cur->priority = MAX (cur->base_priority, cur->donate_priority);
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);

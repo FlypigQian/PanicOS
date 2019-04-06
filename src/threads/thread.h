@@ -109,6 +109,7 @@ struct thread
     /* Task 2 */
     int base_priority;
     int donate_priority;
+    struct list locks_acquired;
   };
 
 /* If false (default), use round-robin scheduler.

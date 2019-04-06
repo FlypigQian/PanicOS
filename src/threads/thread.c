@@ -185,6 +185,14 @@ thread_create (const char *name, int priority,
 
   /* Initialize thread. */
   init_thread (t, name, priority);
+
+	/* Task 1
+		Initialize task 1's snap_ticks to be 0, not in sleep state */
+	t->snap_ticks = 0;
+	t->base_priority = priority;
+	t->donate_priority = PRI_MIN;
+	list_init(&t->locks_acquired);
+
   tid = t->tid = allocate_tid ();
 
   /* Stack frame for kernel_thread(). */
@@ -202,13 +210,6 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
-  /* Task 1 
-    Initialize task 1's snap_ticks to be 0, not in sleep state */
-  t->snap_ticks = 0;
-
-  t->base_priority = priority;
-
-  t->donate_priority = PRI_MIN;
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -481,14 +482,15 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (name != NULL);
 
   memset (t, 0, sizeof *t);
-  t->status = THREAD_BLOCKED;
+	/* Task 2. */
+	t->base_priority = priority;
+	list_init(&t->locks_acquired);
+
+	t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-
-  /* Task 2. */
-  t->base_priority = priority;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
