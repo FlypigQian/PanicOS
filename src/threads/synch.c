@@ -71,7 +71,9 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+    	/* Task 2. */
+    	list_insert_ordered(&sema->waiters, &thread_current ()->elem, list_less_thread_priority, NULL);
+//      list_push_back (&sema->waiters, &thread_current ()->elem);
       thread_block ();
     }
   sema->value--;
@@ -122,6 +124,10 @@ sema_up (struct semaphore *sema)
 
   sema->value++;
   intr_set_level (old_level);
+
+  /* Task 2.
+   * Don't yield inside unblock, because it may do some data synchronization maintain. */
+  thread_yield();
 }
 
 static void sema_test_helper (void *sema_);
@@ -239,11 +245,15 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+	/* Task 2*/
   lock->holder->donate_priority = 0;
   lock->holder->priority = lock->holder->base_priority;
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+
+  /* Task 2*/
+  thread_yield();
 }
 
 /* Returns true if the current thread holds LOCK, false
