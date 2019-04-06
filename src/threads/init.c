@@ -76,6 +76,11 @@ int pintos_init (void) NO_RETURN;
 int
 pintos_init (void)
 {
+	/* Task 3
+	 * initialize load_avg -- a system-wide var estimates the average
+	 * number of threads ready to run over the past minute. */
+	load_avg = FIXED(0);
+
   char **argv;
 
   /* Clear BSS. */  

@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
+#include <lib/kernel/list.h>
 #include "devices/pit.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
@@ -29,8 +30,8 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-/* Task 1. */
-void snap_ticks_check (struct thread *t, void *aux); 
+
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -182,32 +183,24 @@ timer_print_stats (void)
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/* Task 1 -- thread_action_func for thread_foreach in thread.h */
-void 
-snap_ticks_check (struct thread *t, void *aux UNUSED) {
-  // interruption should be turned down during thread_foreach. 
-  ASSERT(intr_get_level () == INTR_OFF); 
-
-  if (t->snap_ticks > 0) {
-  	int a = 1;
-  }
-  if (t->snap_ticks == 0) 
-    return; 
-
-  t->snap_ticks --; 
-  if (t->snap_ticks == 0) {
-    ASSERT (t->status == THREAD_BLOCKED); 
-    thread_unblock(t); 
-  }
-}
-
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  thread_tick (); // record time slice. 
-  thread_foreach (snap_ticks_check, NULL); 
+  thread_tick (); // record time slice.
+  thread_foreach (thread_sleep_check, NULL);
+
+	/* Task 3. data update per second for advanced scheduler.
+	 * update for system-wide load_avg, and
+	 * thread-specific recent_cpu. */
+	if (timer_ticks() % TIMER_FREQ == 0) {
+		int ready_threads = thread_mlfqs_count_ready();
+		load_avg = FADD(FMUL(FFRAC(59, 60), load_avg), FMUL(FFRAC(1, 60), FIXED(ready_threads)));
+		thread_foreach(thread_recent_cpu_update, NULL);
+		if (thread_mlfqs)
+			thread_foreach(thread_priority_update, NULL);
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -280,3 +273,5 @@ real_time_delay (int64_t num, int32_t denom)
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
 }
+
+

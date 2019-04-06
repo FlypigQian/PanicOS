@@ -524,13 +524,3 @@ list_min (struct list *list, list_less_func *less, void *aux)
   return min;
 }
 
-
-bool
-list_less_thread_priority (const struct list_elem *a,
-                           const struct list_elem *b,
-                           void *aux) {
-	struct thread *t1 = list_entry (a, struct thread, elem);
-	struct thread *t2 = list_entry (b, struct thread, elem);
-	return list_entry (a, struct thread, elem)->priority >
-				 list_entry (b, struct thread, elem)->priority;
-}

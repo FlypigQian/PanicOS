@@ -192,47 +192,6 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
-/* Task 2. Priority scheduling.
- * Boost holder's priority with waiter's. Do it iteratively until holder is no longer
- * a waiter for other locks. */
-void
-lock_priority_nested_donation (struct thread *waiter) {
-	struct thread *holder = waiter->lock_waiting->holder;
-	while (1) {
-		holder->donate_priority = MAX (holder->donate_priority, waiter->priority);
-		holder->priority = MAX (holder->priority, holder->donate_priority);
-
-		if (holder->lock_waiting == NULL) return;
-
-		waiter = holder;
-		holder = holder->lock_waiting->holder;
-	}
-}
-
-/* Task 2. Priority scheduling.
- * Calculate maximum effective donation made by a lock's waiters.
- * Return minimum priority if no waiter present. */
-int
-lock_waiters_donation (struct lock *lock) {
-	if (list_empty(&lock->semaphore.waiters))
-		return PRI_MIN;
-	list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
-	return list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
-}
-
-/* Task 2. Priority scheduling.
- * Utility for getting donation from a list of locks. */
-int
-locks_list_donation (struct list *locks) {
-	int tot_donate = PRI_MIN;
-	if (!list_empty(locks))
-		for (struct list_elem *e = list_begin(locks); e != list_end(locks); e = e->next) {
-			struct lock *lock_acq = list_entry(e, struct lock, elem);
-			tot_donate = MAX (tot_donate, lock_waiters_donation(lock_acq));
-		}
-	return tot_donate;
-}
-
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -327,11 +286,15 @@ lock_held_by_current_thread (const struct lock *lock)
   return lock->holder == thread_current ();
 }
 
-/* One semaphore in a list. */
+/* One semaphore in a list.
+ * Used exclusively for condition variable. */
 struct semaphore_elem 
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
+		/* Task 2. thread waiting for the condition variable via this semaphore
+		 * wake up wait_thread with highest priority during cond_signal */
+    struct thread *wait_thread;
   };
 
 /* Initializes condition variable COND.  A condition variable
@@ -374,14 +337,15 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
-  
-  /**
-   * Mumble : use a zero-init semaphore and down it to wait for an event
-   * that will happen once */
+
+	/* Task 2. */
+	waiter.wait_thread = thread_current();
+
   sema_init (&waiter.semaphore, 0);
   list_push_back (&cond->waiters, &waiter.elem);
   lock_release (lock);
   sema_down (&waiter.semaphore);
+
   lock_acquire (lock);
 }
 
@@ -402,7 +366,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
 
   if (!list_empty (&cond->waiters)) {
 	  /* Task 2. priority may change due to donation. */
-		list_sort(&cond->waiters, list_less_thread_priority, NULL);
+		list_sort(&cond->waiters, list_less_cond_waiter_priority, NULL);
 	  sema_up (&list_entry (list_pop_front (&cond->waiters),
 	                        struct semaphore_elem, elem)->semaphore);
   }
@@ -422,4 +386,54 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
+}
+
+
+/* Task 2. Priority scheduling.
+ * Boost holder's priority with waiter's. Do it iteratively until holder is no longer
+ * a waiter for other locks. */
+void
+lock_priority_nested_donation (struct thread *waiter) {
+	struct thread *holder = waiter->lock_waiting->holder;
+	while (1) {
+		holder->donate_priority = MAX (holder->donate_priority, waiter->priority);
+		holder->priority = MAX (holder->priority, holder->donate_priority);
+
+		if (holder->lock_waiting == NULL) return;
+
+		waiter = holder;
+		holder = holder->lock_waiting->holder;
+	}
+}
+
+/* Task 2. Priority scheduling.
+ * Calculate maximum effective donation made by a lock's waiters.
+ * Return minimum priority if no waiter present. */
+int
+lock_waiters_donation (struct lock *lock) {
+	if (list_empty(&lock->semaphore.waiters))
+		return PRI_MIN;
+	list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
+	return list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
+}
+
+/* Task 2. Priority scheduling.
+ * Utility for getting donation from a list of locks. */
+int
+locks_list_donation (struct list *locks) {
+	int tot_donate = PRI_MIN;
+	if (!list_empty(locks))
+		for (struct list_elem *e = list_begin(locks); e != list_end(locks); e = e->next) {
+			struct lock *lock_acq = list_entry(e, struct lock, elem);
+			tot_donate = MAX (tot_donate, lock_waiters_donation(lock_acq));
+		}
+	return tot_donate;
+}
+
+/* Task 2. condition variable waiter sort cmp */
+bool list_less_cond_waiter_priority (const struct list_elem *a,
+                                     const struct list_elem *b,
+                                     void *aux) {
+	return list_entry(a, struct semaphore_elem, elem)->wait_thread->priority >
+				 list_entry(b, struct semaphore_elem, elem)->wait_thread->priority;
 }

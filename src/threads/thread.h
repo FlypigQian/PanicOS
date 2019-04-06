@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <lib/debug.h>
 #include <stdbool.h>
+#include "fixed_point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -110,13 +111,23 @@ struct thread
     int base_priority;
     int donate_priority;
     struct list locks_acquired;
-    struct lock *lock_waiting; 
+    struct lock *lock_waiting;
+
+    /* Task 3*/
+    int nice;
+    fixed_t recent_cpu;
+    int priority_update_tick;
   };
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+/* Task 3 */
+extern fixed_t load_avg;
+/* return ready threads number in ready_lists. Used by timer.c
+ * in updating load_avg */
+int thread_mlfqs_count_ready (void);
 
 void thread_init (void);
 void thread_start (void);
@@ -140,6 +151,13 @@ void thread_yield (void);
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *func, void *aux);
+/* thread_action_funcs used in project 1. */
+/* Task 1. */
+void thread_sleep_check (struct thread *t, void *aux);
+/* Task 3. */
+void thread_recent_cpu_update (struct thread *t, void *aux);
+/* Task 3. */
+void thread_priority_update (struct thread *t, void *aux);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
@@ -149,5 +167,10 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+/* Task 2. ready_list sort cmp */
+bool
+list_less_thread_priority (const struct list_elem *a,
+                           const struct list_elem *b,
+                           void *aux);
 
 #endif /* threads/thread.h */

@@ -3,30 +3,32 @@
 
 typedef int fixed_t;
 
-#define FRAC_BITS (14)
+#define FRAC_BITS ((unsigned int) 14)
 
-#define FRAC (1 << FRAC_BITS)
+#define FRAC ((unsigned int) 1 << FRAC_BITS)
 
-#define FIXED(n) ((fixed_t)(n * FRAC))
+#define FIXED(n) ((fixed_t)((n) * FRAC))
 
-#define FIXED_INT_ZERO(x) ((int) (x / FRAC))
+#define FFRAC(n, m) (FDIV(FIXED(n), FIXED(m)))
 
-#define FIXED_INT_NEAR(x) ((int) ((x >= 0) ? ((x + (FRAC/2)) / FRAC) : ((x - (FRAC/2)) / FRAC)))
+#define FINT_ZERO(x) ((int) ((x) / FRAC))
 
-#define ADD_FIXED(x, y) (x + y)
+#define FINT_NEAR(x) ((int) (((x) >= 0) ? (((x) + (FRAC/2)) / FRAC) : (((x) - (FRAC/2)) / FRAC)))
 
-#define SUB_FIXED(x, y) (x - y)
+#define FADD(x, y) ((x) + (y))
 
-#define ADD_FIXED_INT(x, n) ((fixed_t) (x + FIXED(n)))
+#define FSUB(x, y) ((x) - (y))
 
-#define SUB_FIXED_INT(x, n) ((fixed_t) (x - FIXED(n)))
+#define FADD_INT(x, n) ((fixed_t) ((x) + FIXED(n)))
 
-#define MUL_FIXED(x, y) ((((int64_t) x) * y) / FRAC)
+#define FSUB_INT(x, n) ((fixed_t) ((x) - FIXED(n)))
 
-#define MUL_FIXED_INT(x, n) ((fixed_t) (x * n))
+#define FMUL(x, y) ((fixed_t) ((((int64_t) (x)) * (y)) / FRAC))
 
-#define DIV_FIXED(x, y) ((((int64_t) x) * FRAC) / y)
+#define FMUL_INT(x, n) ((fixed_t) ((x) * (n)))
 
-#define DIV_FIXED_INT(x, n) ((fixed_t) (x / n))
+#define FDIV(x, y) ((fixed_t) ((((int64_t) (x)) * FRAC) / (y)))
+
+#define FDIV_INT(x, n) ((fixed_t) ((x) / (n)))
 
 #endif //CLION_PROJ_FIXED_POINT_H
