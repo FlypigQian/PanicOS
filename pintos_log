@@ -80,14 +80,9 @@ Analysis:
       * this method may be slow, but easy to implement. 
 
 Implementation list:
-  1. 'list_pop_priority' in list.h and list.c. It returns the list_elem with highest priority. 
-  2. For ready_list : change 'next_thread_to_run' in thread.c using list_pop_priority. 
-  3. For synchronization primitives : 
-      change 'sema_up' in synch.c using list_pop_priority.  
-      change 'cond_signal' in synch.c using list_pop_priority. 
-  4. add donate_bills (list) and base_priority to struct thread and initialize it in thread_create in 'thread.c'.
-      write function 'donate_priority' and 'withdraw_priority', which modify donate_bills and 
-      maintain correct priority. 
+    1. add fields to thread and lock.
+    2. list_insert_ordered in list.h
+    3. most of the work is done in synch.h. See Task 2 function declaration there. The code is well organized.
 
 Bugfix : 
   1. When cur_thread yields, push it to ready_list first and then do schedule. 
@@ -95,4 +90,31 @@ Bugfix :
   3. A thread can set itself's base priority. If it has been donated, its effective priority is 
       the higher of the base and the donation. 
   4. define struct donate_bill. attach a bill-list as a thread field. 
-  5. when modify donate_bills and setup new priority, make sure INTR_OFF. I assume this has been done in synch. 
+  5. when modify donate_bills and setup new priority, make sure INTR_OFF. I assume this has been done in synch.
+
+
+Task 3. Advanced Scheduler.
+  Reading comprehension : 
+    1. nice : thread field, inherited from parent thread, can be set. 
+    2. priority calc : 
+      calculated at thread initialization. recalculated once every fourth clock tick. 
+      dependence : recent_cpu & nice. 
+      round to nearest. 
+    3. recent_cpu : 
+      exponentially weighted moving average ??? 
+      recent_cpu is 0 for first thread. other new thread inherits its parent's recent_cpu. 
+      increment at each timer interruption. 
+      recalculate once per second -> depends on load_avg. 
+      (the rate of decay for 'recently' depends inversely proportional to the number of threads competing for the cpu). 
+    4. load_avg : 
+      A system-wide quantity instead of thread-specific. 
+      initialized to be 0 at system boost. updated by exponential moving average policy. 
+
+Scheduler mode selection specification :   
+  You must write your code to allow us to choose a scheduling algorithm policy at Pintos startup time.
+  By default, the priority scheduler must be active, but we must be able to choose the 4.4BSD scheduler with the ‘-mlfqs’ kernel option. 
+  Passing this option sets thread_mlfqs, declared in ‘threads/thread.h’, to true when the options are parsed by parse_options(), which happens early in main().
+
+  Turn off : 
+    1. Choose thread to run based on priorities, but doesn't do priority donation. 
+    2. Priority won't be set by threads themselves anymore. Disable it in thread_create() and thread_set_priority(). 
