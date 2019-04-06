@@ -72,8 +72,7 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0) 
     {
     	/* Task 2. */
-    	list_insert_ordered(&sema->waiters, &thread_current ()->elem, list_less_thread_priority, NULL);
-//      list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_push_back (&sema->waiters, &thread_current ()->elem);
       thread_block ();
     }
   sema->value--;
@@ -118,9 +117,12 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters))
+  if (!list_empty (&sema->waiters)) {
+		/* Task 2. priority may change due to donation. */
+	  list_sort(&sema->waiters, list_less_thread_priority, NULL);
 	  thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+	                              struct thread, elem));
+  }
 
   sema->value++;
   intr_set_level (old_level);
@@ -380,9 +382,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters))
-		sema_up (&list_entry (list_pop_front (&cond->waiters),
-												struct semaphore_elem, elem)->semaphore);
+  if (!list_empty (&cond->waiters)) {
+		list_sort(&cond->waiters, list_less_thread_priority, NULL);
+	  sema_up (&list_entry (list_pop_front (&cond->waiters),
+	                        struct semaphore_elem, elem)->semaphore);
+  }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
