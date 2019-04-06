@@ -71,7 +71,6 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-    	/* Task 2. */
       list_push_back (&sema->waiters, &thread_current ()->elem);
       thread_block ();
     }
@@ -193,6 +192,47 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
+/* Task 2. Priority scheduling.
+ * Boost holder's priority with waiter's. Do it iteratively until holder is no longer
+ * a waiter for other locks. */
+void
+lock_priority_nested_donation (struct thread *waiter) {
+	struct thread *holder = waiter->lock_waiting->holder;
+	while (1) {
+		holder->donate_priority = MAX (holder->donate_priority, waiter->priority);
+		holder->priority = MAX (holder->priority, holder->donate_priority);
+
+		if (holder->lock_waiting == NULL) return;
+
+		waiter = holder;
+		holder = holder->lock_waiting->holder;
+	}
+}
+
+/* Task 2. Priority scheduling.
+ * Calculate maximum effective donation made by a lock's waiters.
+ * Return minimum priority if no waiter present. */
+int
+lock_waiters_donation (struct lock *lock) {
+	if (list_empty(&lock->semaphore.waiters))
+		return PRI_MIN;
+	list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
+	return list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
+}
+
+/* Task 2. Priority scheduling.
+ * Utility for getting donation from a list of locks. */
+int
+locks_list_donation (struct list *locks) {
+	int tot_donate = PRI_MIN;
+	if (!list_empty(locks))
+		for (struct list_elem *e = list_begin(locks); e != list_end(locks); e = e->next) {
+			struct lock *lock_acq = list_entry(e, struct lock, elem);
+			tot_donate = MAX (tot_donate, lock_waiters_donation(lock_acq));
+		}
+	return tot_donate;
+}
+
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -211,34 +251,20 @@ lock_acquire (struct lock *lock)
   /* Task 2. */
 	if (!lock_try_acquire(lock)) {
 		// wait for lock, boost locker's priority, recursively.
-		struct thread *holder = lock->holder;
-		struct thread *cur = thread_current();
-
-		while (1) {
-			holder->donate_priority = MAX (holder->donate_priority, cur->priority);
-			holder->priority = MAX (holder->priority, holder->donate_priority);
-
-			if (holder->lock_waiting == NULL) break;
-
-			cur = holder;
-			holder = holder->lock_waiting->holder;
-		}
 		thread_current()->lock_waiting = lock;
-
+		lock_priority_nested_donation(thread_current());
 
 		sema_down(&lock->semaphore);
+
 		thread_current()->lock_waiting = NULL;
 		lock->holder = thread_current ();
 	}
 	// manage to acquire lock. boost self's priority using locks' waiters.
 	list_push_back(&thread_current()->locks_acquired, &lock->elem);
-	if (!list_empty(&lock->semaphore.waiters)) {
-//		list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
-		int donate = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
-		struct thread *cur = thread_current();
-		cur->donate_priority = MAX (cur->donate_priority, donate);
-		cur->priority = MAX (cur->priority, cur->donate_priority);
-	}
+	struct thread *cur = thread_current();
+	int donate = lock_waiters_donation(lock);
+	cur->donate_priority = MAX (cur->donate_priority, donate);
+	cur->priority = MAX (cur->priority, cur->donate_priority);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -280,15 +306,7 @@ lock_release (struct lock *lock)
 	cur->priority = cur->base_priority;
 	cur->donate_priority = 0;
 
-	if (!list_empty(&cur->locks_acquired))
-		for (struct list_elem *e = list_begin(&cur->locks_acquired);
-				 e != list_end(&cur->locks_acquired); e = e->next) {
-			struct lock *lock_acq = list_entry(e, struct lock, elem);
-			if (!list_empty(&lock_acq->semaphore.waiters)) {
-				struct thread *high = list_entry(list_front(&lock_acq->semaphore.waiters), struct thread, elem);
-				cur->donate_priority = MAX (cur->donate_priority, high->priority);
-			}
-		}
+	cur->donate_priority = MAX (cur->donate_priority, locks_list_donation(&cur->locks_acquired));
 	cur->priority = MAX (cur->base_priority, cur->donate_priority);
 
   lock->holder = NULL;
@@ -383,6 +401,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (lock_held_by_current_thread (lock));
 
   if (!list_empty (&cond->waiters)) {
+	  /* Task 2. priority may change due to donation. */
 		list_sort(&cond->waiters, list_less_thread_priority, NULL);
 	  sema_up (&list_entry (list_pop_front (&cond->waiters),
 	                        struct semaphore_elem, elem)->semaphore);
@@ -403,15 +422,4 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
-}
-
-
-void
-lock_boost_holder_priority (struct lock *lock) {
-	if (list_empty(&lock->semaphore.waiters))
-		return ;
-
-	list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
-	lock->holder->donate_priority = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
-	lock->holder->priority = MAX (lock->holder->priority, lock->holder->donate_priority);
 }

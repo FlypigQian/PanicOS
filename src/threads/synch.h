@@ -42,9 +42,11 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
-/* Task 2 */
-void lock_boost_holder_priority (struct lock *);
 
+/* Task 2. Priority scheduling. */
+void lock_priority_nested_donation (struct thread *);
+int lock_waiters_donation (struct lock *);
+int locks_list_donation (struct list *);
 /* Optimization barrier.
 
    The compiler will not reorder operations across an
