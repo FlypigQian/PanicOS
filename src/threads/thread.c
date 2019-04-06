@@ -189,9 +189,11 @@ thread_create (const char *name, int priority,
 	/* Task 1
 		Initialize task 1's snap_ticks to be 0, not in sleep state */
 	t->snap_ticks = 0;
+	/* Task 2 */
 	t->base_priority = priority;
 	t->donate_priority = PRI_MIN;
 	list_init(&t->locks_acquired);
+	t->lock_waiting = NULL;
 
   tid = t->tid = allocate_tid ();
 
@@ -484,7 +486,9 @@ init_thread (struct thread *t, const char *name, int priority)
   memset (t, 0, sizeof *t);
 	/* Task 2. */
 	t->base_priority = priority;
+	t->donate_priority = PRI_MIN;
 	list_init(&t->locks_acquired);
+	t->lock_waiting = NULL;
 
 	t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);

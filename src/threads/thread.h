@@ -110,6 +110,7 @@ struct thread
     int base_priority;
     int donate_priority;
     struct list locks_acquired;
+    struct lock *lock_waiting; 
   };
 
 /* If false (default), use round-robin scheduler.

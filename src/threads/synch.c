@@ -208,11 +208,24 @@ lock_acquire (struct lock *lock)
 
   /* Task 2. */
 	if (!lock_try_acquire(lock)) {
-		// wait for lock, boost locker's priority.
-		lock->holder->donate_priority = MAX (lock->holder->donate_priority, thread_current()->priority);
-		lock->holder->priority = MAX (lock->holder->priority, lock->holder->donate_priority);
+		// wait for lock, boost locker's priority, recursively.
+		struct thread *holder = lock->holder;
+		struct thread *cur = thread_current();
+
+		while (1) {
+			holder->donate_priority = MAX (holder->donate_priority, cur->priority);
+			holder->priority = MAX (holder->priority, holder->donate_priority);
+
+			if (holder->lock_waiting == NULL) break;
+
+			cur = holder;
+			holder = holder->lock_waiting->holder;
+		}
+		thread_current()->lock_waiting = lock;
+
 
 		sema_down(&lock->semaphore);
+		thread_current()->lock_waiting = NULL;
 		lock->holder = thread_current ();
 	}
 	// manage to acquire lock. boost self's priority using locks' waiters.
