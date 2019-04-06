@@ -239,7 +239,9 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-//  lock->holder->priority = lock->holder->base_priority;
+  lock->holder->donate_priority = 0;
+  lock->holder->priority = lock->holder->base_priority;
+
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
@@ -356,6 +358,6 @@ lock_boost_holder_priority (struct lock *lock) {
 		return ;
 
 	list_sort(&lock->semaphore.waiters, list_less_thread_priority, NULL);
-	int donate = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
-	lock->holder->priority = MAX (lock->holder->priority, donate);
+	lock->holder->donate_priority = list_entry(list_front(&lock->semaphore.waiters), struct thread, elem)->priority;
+	lock->holder->priority = MAX (lock->holder->priority, lock->holder->donate_priority);
 }
