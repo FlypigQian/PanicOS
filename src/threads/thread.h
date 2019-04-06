@@ -105,8 +105,6 @@ struct thread
 
     /* Task 1, amount of ticks remains to sleep. 0 if not in sleep state. */
     int64_t snap_ticks; 
-
-    int base_priority;
   };
 
 /* If false (default), use round-robin scheduler.
