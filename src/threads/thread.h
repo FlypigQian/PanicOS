@@ -116,7 +116,6 @@ struct thread
     /* Task 3*/
     int nice;
     fixed_t recent_cpu;
-    int priority_update_tick;
   };
 
 /* If false (default), use round-robin scheduler.
@@ -125,9 +124,6 @@ struct thread
 extern bool thread_mlfqs;
 /* Task 3 */
 extern fixed_t load_avg;
-/* return ready threads number in ready_lists. Used by timer.c
- * in updating load_avg */
-int thread_mlfqs_count_ready (void);
 
 void thread_init (void);
 void thread_start (void);
@@ -151,13 +147,6 @@ void thread_yield (void);
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *func, void *aux);
-/* thread_action_funcs used in project 1. */
-/* Task 1. */
-void thread_sleep_check (struct thread *t, void *aux);
-/* Task 3. */
-void thread_recent_cpu_update (struct thread *t, void *aux);
-/* Task 3. */
-void thread_priority_update (struct thread *t, void *aux);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
@@ -172,5 +161,18 @@ bool
 list_less_thread_priority (const struct list_elem *a,
                            const struct list_elem *b,
                            void *aux);
+
+/* thread_action_funcs used in project 1. */
+/* Task 1. */
+void thread_sleep_check (struct thread *t, void *aux);
+/* Task 3. */
+void thread_recent_cpu_increment (void);
+void thread_load_avg_update (void);
+void thread_recent_cpu_update (struct thread *t, void *aux);
+void thread_priority_update (struct thread *t, void *aux);
+int thread_highest_ready_priority(void);
+void thread_push_ready_lists (struct thread *t);
+struct thread * pop_highest_ready_thread (void);
+void thread_print_all (void);
 
 #endif /* threads/thread.h */

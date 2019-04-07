@@ -126,9 +126,9 @@ sema_up (struct semaphore *sema)
   sema->value++;
   intr_set_level (old_level);
 
-  /* Task 2.
-   * Don't yield inside unblock, because it may do some data synchronization maintain. */
-  thread_yield();
+  /* Task 2. Task 3. if unblocked thread has higher priority, yield. */
+//	if (thread_current()->priority < thread_highest_ready_priority())
+		thread_yield();
 }
 
 static void sema_test_helper (void *sema_);
@@ -207,23 +207,29 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  /* Task 2. */
-	if (!lock_try_acquire(lock)) {
-		// wait for lock, boost locker's priority, recursively.
-		thread_current()->lock_waiting = lock;
-		lock_priority_nested_donation(thread_current());
+  if (!thread_mlfqs) {
+	  /* Task 2. */
+	  if (!lock_try_acquire(lock)) {
+		  // wait for lock, boost locker's priority, recursively.
+		  thread_current()->lock_waiting = lock;
+		  lock_priority_nested_donation(thread_current());
 
-		sema_down(&lock->semaphore);
+		  sema_down(&lock->semaphore);
 
-		thread_current()->lock_waiting = NULL;
-		lock->holder = thread_current ();
-	}
-	// manage to acquire lock. boost self's priority using locks' waiters.
-	list_push_back(&thread_current()->locks_acquired, &lock->elem);
-	struct thread *cur = thread_current();
-	int donate = lock_waiters_donation(lock);
-	cur->donate_priority = MAX (cur->donate_priority, donate);
-	cur->priority = MAX (cur->priority, cur->donate_priority);
+		  thread_current()->lock_waiting = NULL;
+		  lock->holder = thread_current ();
+	  }
+	  // manage to acquire lock. boost self's priority using locks' waiters.
+	  list_push_back(&thread_current()->locks_acquired, &lock->elem);
+	  struct thread *cur = thread_current();
+	  int donate = lock_waiters_donation(lock);
+	  cur->donate_priority = MAX (cur->donate_priority, donate);
+	  cur->priority = MAX (cur->priority, cur->donate_priority);
+  }
+  else {
+	  sema_down(&lock->semaphore);
+	  lock->holder = thread_current ();
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -257,22 +263,25 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-	/* Task 2*/
-	ASSERT(thread_current() == lock->holder);
-	struct thread *cur = thread_current();
-	list_remove(&lock->elem);
-	// recalculate this thread's priority
-	cur->priority = cur->base_priority;
-	cur->donate_priority = 0;
+  if (!thread_mlfqs) {
+	  /* Task 2*/
+	  ASSERT(thread_current() == lock->holder);
+	  struct thread *cur = thread_current();
+	  list_remove(&lock->elem);
+	  // recalculate this thread's priority
+	  cur->priority = cur->base_priority;
+	  cur->donate_priority = 0;
 
-	cur->donate_priority = MAX (cur->donate_priority, locks_list_donation(&cur->locks_acquired));
-	cur->priority = MAX (cur->base_priority, cur->donate_priority);
+	  cur->donate_priority = MAX (cur->donate_priority, locks_list_donation(&cur->locks_acquired));
+	  cur->priority = MAX (cur->base_priority, cur->donate_priority);
 
-  lock->holder = NULL;
-  sema_up (&lock->semaphore);
-
-  /* Task 2*/
-  thread_yield();
+	  lock->holder = NULL;
+	  sema_up(&lock->semaphore);
+  }
+  else {
+	  lock->holder = NULL;
+	  sema_up(&lock->semaphore);
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false

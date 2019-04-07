@@ -91,12 +91,6 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  // int64_t start = timer_ticks ();
-
-  // ASSERT (intr_get_level () == INTR_ON);
-  // while (timer_elapsed (start) < ticks) 
-    // thread_yield ();
-
   /* Task 1. */
   // sanity check for robostness. 
   if (ticks <= 0) return; 
@@ -187,6 +181,8 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+	static int secs = 0;
+
   ticks++;
   thread_tick (); // record time slice.
   thread_foreach (thread_sleep_check, NULL);
@@ -194,12 +190,18 @@ timer_interrupt (struct intr_frame *args UNUSED)
 	/* Task 3. data update per second for advanced scheduler.
 	 * update for system-wide load_avg, and
 	 * thread-specific recent_cpu. */
-	if (timer_ticks() % TIMER_FREQ == 0) {
-		int ready_threads = thread_mlfqs_count_ready();
-		load_avg = FADD(FMUL(FFRAC(59, 60), load_avg), FMUL(FFRAC(1, 60), FIXED(ready_threads)));
-		thread_foreach(thread_recent_cpu_update, NULL);
-		if (thread_mlfqs)
+	if (thread_mlfqs) {
+		thread_recent_cpu_increment();
+		if (ticks % TIMER_FREQ == 0) {
+			thread_load_avg_update();
+			thread_foreach(thread_recent_cpu_update, NULL);
 			thread_foreach(thread_priority_update, NULL);
+		}
+		else if (ticks % 4 == 0) {
+			thread_priority_update(thread_current(), NULL);
+		}
+		if (thread_current()->priority < thread_highest_ready_priority())
+			intr_yield_on_return();
 	}
 }
 

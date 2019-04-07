@@ -23,13 +23,15 @@
 #define THREAD_MAGIC 0xcd6abf4b
 
 #define MAX(a,b)  (((a)>(b))?(a):(b))
+#define MIN(a,b)  (((a)<(b))?(a):(b))
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
 
 /* Task 3 */
-static struct list ready_lists[PRI_MAX + 1];
+struct list ready_lists[PRI_MAX + 1];
+
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -143,16 +145,12 @@ thread_tick (void)
   else if (t->pagedir != NULL)
     user_ticks++;
 #endif
-  else {
+  else
 		kernel_ticks++;
-		/* Task 3
-		 * increment cur_thread's recent_cpu by 1, if not idle */
-		t->recent_cpu = FADD_INT(t->recent_cpu, 1);
-	}
 
-  /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
-    intr_yield_on_return ();
+	/* Enforce preemption. */
+	if (++thread_ticks >= TIME_SLICE)
+		intr_yield_on_return();
 }
 
 /* Prints thread statistics. */
@@ -210,7 +208,6 @@ thread_create (const char *name, int priority,
 	 * new thread's nice and recent_cpu are inherited from parent */
 	t->nice = thread_current()->nice;
 	t->recent_cpu = thread_current()->recent_cpu;
-	t->priority_update_tick = 0;
 
   tid = t->tid = allocate_tid ();
 
@@ -271,9 +268,13 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  /* Task 2 */
-  list_insert_ordered(&ready_list, &t->elem, list_less_thread_priority, NULL);
-//  list_push_back (&ready_list, &t->elem);
+	if (!thread_mlfqs)
+		/* Task 2 */
+    list_insert_ordered(&ready_list, &t->elem, list_less_thread_priority, NULL);
+	else
+		/* Task 3 */
+		list_push_back(ready_lists + t->priority, &t->elem);
+
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -345,10 +346,15 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread)
-	  /* Task 2 */
-	  list_insert_ordered(&ready_list, &cur->elem, list_less_thread_priority, NULL);
-//    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread) {
+	  if (!thread_mlfqs)
+		  /* Task 2 */
+		  list_insert_ordered(&ready_list, &cur->elem, list_less_thread_priority, NULL);
+	  else
+		  /* Task 3 */
+		  list_push_back(ready_lists + cur->priority, &cur->elem);
+  }
+
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -375,9 +381,10 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+	ASSERT(!thread_mlfqs);
+
 	thread_current()->base_priority = new_priority;
   thread_current ()->priority = MAX (thread_current()->base_priority, thread_current()->donate_priority);
-
   thread_yield ();
 }
 
@@ -392,7 +399,13 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  ASSERT(thread_mlfqs);
+
+  thread_current()->nice = nice;
+  thread_priority_update(thread_current(), NULL);
+
+//  if (thread_current()->priority < thread_highest_ready_priority())
+  	thread_yield();
 }
 
 /* Returns the current thread's nice value. */
@@ -509,7 +522,6 @@ init_thread (struct thread *t, const char *name, int priority)
 	/* Task 3. initial thread's nice and recent_cpu are set to 0. */
 	t->nice = 0;
 	t->recent_cpu = FIXED(0);
-	t->priority_update_tick = 0;
 
 	t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
@@ -543,10 +555,21 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list))
-    return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+	if (!thread_mlfqs) {
+		if (list_empty (&ready_list))
+			return idle_thread;
+		else
+			return list_entry (list_pop_front (&ready_list), struct thread, elem);
+	}
+	else {
+		/* Task 3. schedule round-robin for highest-priority-non-empty queue */
+		for (int i = PRI_MAX; i >= PRI_MIN; --i) {
+			if (!list_empty(ready_lists + i)) {
+				return list_entry(list_pop_front(ready_lists + i), struct thread, elem);
+			}
+		}
+		return idle_thread;
+	}
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -609,11 +632,14 @@ schedule (void)
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;
 
+//	printf("is_thread : %d\n", is_thread(next));
+
   ASSERT (intr_get_level () == INTR_OFF);
   ASSERT (cur->status != THREAD_RUNNING);
   ASSERT (is_thread (next));
 
-  if (cur != next)
+
+	if (cur != next)
     prev = switch_threads (cur, next);
   thread_schedule_tail (prev);
 }
@@ -635,7 +661,6 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
-
 
 
 /* Task 1 -- thread_action_func for thread_foreach in thread.h */
@@ -668,6 +693,9 @@ list_less_thread_priority (const struct list_elem *a,
 /* Task 3 */
 void
 thread_recent_cpu_update (struct thread *t, void *aux UNUSED) {
+	ASSERT(thread_mlfqs);
+	ASSERT(intr_context());
+
 	t->recent_cpu = FADD_INT(
 		FMUL(
 			FDIV(
@@ -676,28 +704,103 @@ thread_recent_cpu_update (struct thread *t, void *aux UNUSED) {
 		t->nice);
 }
 
-/* Task 3 return ready threads number in ready_lists */
-int thread_mlfqs_count_ready (void) {
-	int ready_threads = 0;
-	for (int i = PRI_MIN; i <= PRI_MAX; ++i)
-		ready_threads += list_size(ready_lists + i);
-	return ready_threads;
+/* Task 3 */
+void
+thread_priority_update (struct thread *t, void *aux) {
+	ASSERT(thread_mlfqs);
+
+	if (t == idle_thread)
+		return ;
+
+	int priority = FINT_NEAR(
+		FSUB(
+			FSUB(
+				FIXED(PRI_MAX),
+				FDIV_INT(t->recent_cpu, 4)
+			),
+			FMUL_INT(FIXED(t->nice), 2)
+		)
+	);
+
+	int old = priority;
+
+	priority = MAX (priority, PRI_MIN);
+	priority = MIN (priority, PRI_MAX);
+
+//	printf("%s update old %d raw %d, new %d recent_cpu %d, nice %d \n", thread_current()->name, thread_current()->priority, old, priority,
+//																																			FINT_ZERO(t->recent_cpu), FINT_ZERO(t->nice));
+
+	t->priority = priority;
+
+	// put thread well away in ready queue.
+	if (t->status == THREAD_READY) {
+		list_remove(&t->elem);
+		list_push_back(ready_lists + t->priority, &t->elem);
+	}
 }
 
 /* Task 3 */
 void
-thread_priority_update (struct thread *t, void *aux) {
-	if (++t->priority_update_tick == 4) {
-		t->priority_update_tick = 0;
-		t->priority = FINT_NEAR(
-			FSUB(
-				FIXED(PRI_MAX),
-				FSUB(
-					FDIV_INT(t->recent_cpu, 4),
-		      FMUL_INT(t->nice, 2)
-				)
-			)
-		);
+thread_recent_cpu_increment (void) {
+	ASSERT(thread_mlfqs);
+	ASSERT(intr_context());
+
+	if (thread_current() == idle_thread)
+		return;
+	thread_current()->recent_cpu = FADD_INT(thread_current()->recent_cpu, 1);
+}
+
+void thread_load_avg_update (void) {
+	ASSERT(thread_mlfqs);
+	ASSERT(intr_context());
+
+	int ready_threads = (thread_current() == idle_thread) ? 0 : 1 ;
+	for (int i = PRI_MIN; i <= PRI_MAX; ++i)
+		ready_threads += list_size(ready_lists + i);
+
+	load_avg = FADD(FMUL(FFRAC(59, 60), load_avg), FMUL(FFRAC(1, 60), FIXED(ready_threads)));
+}
+
+int
+thread_highest_ready_priority (void) {
+	if (!thread_mlfqs) {
+		if (!list_empty(&ready_list))
+			return list_entry(list_front(&ready_list), struct thread, elem)->priority;
+		return PRI_MIN;
 	}
+	else {
+		for (int i = PRI_MAX; i >= PRI_MIN; --i)
+			if (!list_empty(ready_lists + i))
+				return i;
+		// all queues are empty.
+		return PRI_MIN;
+	}
+}
+
+/* Task 3. debug */
+void
+thread_print_one (struct thread *t, void *aux) {
+//	printf("%s proty : %d nice: %d snap: %d load_avg: %d status: ", t->name, t->priority, t->nice, t->snap_ticks, thread_get_load_avg());
+	printf("%s proty : %d nice: %d snap: %d status: ", t->name, t->priority, t->nice, t->snap_ticks);
+	if (t->status == THREAD_RUNNING)
+		printf("run");
+	else if (t->status == THREAD_READY)
+		printf("ready");
+	else if (t->status == THREAD_BLOCKED)
+		printf("blocked");
+	else
+		printf("other");
+	printf("\n");
+}
+
+void
+thread_print_all (void) {
+	enum intr_level old_level;
+	old_level = intr_disable ();
+
+	thread_foreach(thread_print_one, NULL);
+	printf("\n");
+
+	intr_set_level (old_level);
 }
 
