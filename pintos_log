@@ -7,6 +7,8 @@ Technical:
   1. Interruption handler cannot sleep --> check manual in detail for interruption. 
   2.
 
+PROJECT 1 : THREAD
+
 In task 1, when a thread is calling timer_sleep, we put it to block state to avoid scheduling.
 In order to put the pending threads back to ready state, we do checking traversal at each time interruption. 
 If the sleeping time is satisfied, unblock the sleeping thread and repush it into ready_list. 
@@ -118,3 +120,13 @@ Scheduler mode selection specification :
   Turn off : 
     1. Choose thread to run based on priorities, but doesn't do priority donation. 
     2. Priority won't be set by threads themselves anymore. Disable it in thread_create() and thread_set_priority(). 
+
+
+
+PROJECT 2 : USER-PROGRAM
+Usr-program is wrapped with '_start'.
+The kernel is initialized and simulated in thread/init.c.
+Process_wait is wrapped by run_task.
+To load user program and run, the code goes into /threads/init.c. if we are in thread mode, call 'run_test (task);' which
+enters thread test. else if we are in user-program mode, call 'process_wait (process_execute (task));' which is defined in
+/userprog/process.h.

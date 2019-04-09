@@ -116,19 +116,25 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) {
+	if (!list_empty (&sema->waiters)) {
 		/* Task 2. priority may change due to donation. */
-	  list_sort(&sema->waiters, list_less_thread_priority, NULL);
-	  thread_unblock (list_entry (list_pop_front (&sema->waiters),
-	                              struct thread, elem));
-  }
+		list_sort(&sema->waiters, list_less_thread_priority, NULL);
+		thread_unblock (list_entry (list_pop_front (&sema->waiters),
+		                            struct thread, elem));
+	}
+	sema->value++;
+	intr_set_level (old_level);
 
-  sema->value++;
-  intr_set_level (old_level);
-
-  /* Task 2. Task 3. if unblocked thread has higher priority, yield. */
-//	if (thread_current()->priority < thread_highest_ready_priority())
-		thread_yield();
+	/* Task 2. Task 3. if unblocked thread has higher priority, yield.
+	 * cannot yield here, cause kernel panic during booting.
+	 * Since lock-release and sema-up both may create threads with higher priority,
+	 * yield in sema. */
+	if (thread_start_flag)  {
+		if (intr_context())
+			intr_yield_on_return();
+		else
+			thread_yield();
+	}
 }
 
 static void sema_test_helper (void *sema_);
@@ -274,14 +280,10 @@ lock_release (struct lock *lock)
 
 	  cur->donate_priority = MAX (cur->donate_priority, locks_list_donation(&cur->locks_acquired));
 	  cur->priority = MAX (cur->base_priority, cur->donate_priority);
+  }
+  lock->holder = NULL;
+  sema_up(&lock->semaphore);
 
-	  lock->holder = NULL;
-	  sema_up(&lock->semaphore);
-  }
-  else {
-	  lock->holder = NULL;
-	  sema_up(&lock->semaphore);
-  }
 }
 
 /* Returns true if the current thread holds LOCK, false

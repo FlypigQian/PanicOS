@@ -22,6 +22,11 @@ enum thread_status
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
 
+/* Userprog flag for thread-yield in synch.c. Yield only after
+ * thread-start in init.c. */
+bool thread_start_flag;
+
+
 /* Thread priorities. */
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
@@ -171,8 +176,6 @@ void thread_load_avg_update (void);
 void thread_recent_cpu_update (struct thread *t, void *aux);
 void thread_priority_update (struct thread *t, void *aux);
 int thread_highest_ready_priority(void);
-void thread_push_ready_lists (struct thread *t);
-struct thread * pop_highest_ready_thread (void);
 void thread_print_all (void);
 
 #endif /* threads/thread.h */

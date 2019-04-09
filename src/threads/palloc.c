@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <lib/debug.h>
 #include "threads/loader.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"

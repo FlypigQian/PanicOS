@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <lib/debug.h>
 
 #include "threads/loader.h"
 
