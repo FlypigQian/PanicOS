@@ -209,6 +209,10 @@ thread_create (const char *name, int priority,
 	t->nice = thread_current()->nice;
 	t->recent_cpu = thread_current()->recent_cpu;
 
+#ifdef USERPROG
+	list_init(&t->file_descriptors);
+#endif
+
   tid = t->tid = allocate_tid ();
 
   /* Stack frame for kernel_thread(). */

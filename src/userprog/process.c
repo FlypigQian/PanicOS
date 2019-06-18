@@ -1,10 +1,14 @@
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <threads/synch.h>
+#include <threads/malloc.h>
+#include <devices/timer.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -88,7 +92,8 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  while (true) {}
+  timer_msleep(1 * 1000);
+  /* while (true) {} */
   return -1;
 }
 
@@ -98,6 +103,16 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* Close opened files and free file_descriptors. */
+  struct list * fd_list = &cur->file_descriptors;
+  while (!list_empty(fd_list)) {
+    struct list_elem * e = list_pop_front(fd_list);
+    struct file_descriptor * fd = list_entry(e, struct file_descriptor, elem);
+    /* TODO: need fs_lock here */
+    file_close(fd->file);
+    free(fd);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
