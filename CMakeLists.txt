@@ -11,4 +11,5 @@ include_directories(src/lib/kernel)
 
 file(GLOB_RECURSE SRCS "src/*.c")
 add_library(kernel ${SRCS})
+target_compile_definitions(kernel PRIVATE USERPROG)
 

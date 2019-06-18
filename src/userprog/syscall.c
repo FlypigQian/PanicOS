@@ -3,8 +3,16 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "pagedir.h"
 
 static void syscall_handler (struct intr_frame *);
+
+bool is_legal_uaddr (const void *uaddr) {
+  struct thread *cur = thread_current();
+  return (uaddr != NULL && is_user_vaddr(uaddr) &&
+          (pagedir_get_page (cur->pagedir, uaddr)) != NULL);
+}
 
 void
 syscall_init (void) 
