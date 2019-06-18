@@ -292,6 +292,8 @@ parse_options (char **argv)
 static void
 run_task (char **argv)
 {
+  int argc = sizeof (argv) / sizeof (char **);
+
   const char *task = argv[1];
   
   printf ("Executing '%s':\n", task);

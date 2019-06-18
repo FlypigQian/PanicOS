@@ -26,22 +26,22 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *cmd)
 {
-  char *fn_copy;
+  char *cmd_copy;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  cmd_copy = palloc_get_page (0);
+  if (cmd_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (cmd_copy, cmd, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (cmd, PRI_DEFAULT, start_process, cmd_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (cmd_copy);
   return tid;
 }
 
@@ -88,6 +88,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while (true) {}
   return -1;
 }
 
@@ -208,6 +209,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
+  // printf ("[DEBUG] Loading...\n");
+
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -222,10 +225,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  char exe_name[128] = { 0 };
+  for (i = 0; file_name[i] != ' ' && file_name[i] != 0; ++i)
+    {
+      exe_name[i] = file_name[i];
+    }
+
+  file = filesys_open (exe_name);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", exe_name);
       goto done; 
     }
 
@@ -304,6 +313,48 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+  ASSERT (*esp == PHYS_BASE)
+
+  /* Parse the command line arguments */
+  {
+    const int MAX_ARGC = 16;
+    const int MAX_FILE_NAME_LEN = 128;
+    int file_name_len = strlen (file_name);
+    ASSERT (file_name_len <= MAX_FILE_NAME_LEN)
+    *esp = (char *) (*esp) - file_name_len - 1;
+    strlcpy (*esp, file_name, MAX_FILE_NAME_LEN);
+
+    int argc = 0;
+    char *argv[MAX_ARGC];
+    {
+      char *save_ptr;
+      for (char *tok = strtok_r (*esp, " ", &save_ptr); tok != NULL;
+           tok = strtok_r (NULL, " ", &save_ptr))
+        {
+          argv[argc++] = tok;
+          ASSERT (argc <= MAX_ARGC)
+        }
+    }
+
+    // printf ("[DEBUG] argc = %d\n", argc);
+
+    *esp = (char *)(*esp) - ((uintptr_t)(*esp) % 4);  /* alignment */
+
+    *esp = (char *)(*esp) - 4;
+    *(int *)(*esp) = 0;
+
+    *esp = (char *)(*esp) - argc * 4;
+    memcpy (*esp, argv, argc * 4);
+
+    *esp = (char *)(*esp) - 4;
+    *(void **)(*esp) = (char *)(*esp) + 4;
+
+    *esp = (char *)(*esp) - 4;
+    *(int *)(*esp) = argc;
+
+    *esp = (char *)(*esp) - 4;  /* The fake return address */
+    *(int *)(*esp) = 0;
+  }
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -313,6 +364,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  // printf ("[DEBUG] Load ended.\n");
   return success;
 }
 
