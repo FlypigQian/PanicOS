@@ -10,6 +10,12 @@
 #include "process.h"
 #include "user/syscall.h"
 
+struct file_descriptor {
+  int id;
+  struct file* file;
+  struct list_elem elem;
+};
+
 static void syscall_handler (struct intr_frame *);
 
 bool is_legal_uaddr (const void *uaddr) {
