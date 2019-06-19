@@ -104,8 +104,14 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    char exe_name[64];                  /* The name of the executable */
+    int exitcode;
+    size_t children_number;
+    size_t children_array_capacity;
+    tid_t * children_processes;
 
-    struct list file_descriptors;       /* List of file_descriptors the thread owns */
+    /* List of file_descriptors the thread owns */
+    struct list file_descriptors;
 #endif
 
     /* Owned by thread.c. */

@@ -22,8 +22,141 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#include "devices/timer.h"
+#include "threads/malloc.h"
+#include "threads/synch.h"
+
+/* The implementation of process_wait
+   process_wait is used to wait for a child process to exit and get its
+   exitcode. We discuss some details in our implementation here.
+   - How can a process know who is its child?
+     A vector of tid_t is maintained in struct thread. Each time the process
+     spawn a child process, its tid is added into this vector. Note that this
+     vector will never shrink, since even if the child process has exited,
+     the parent process can still call process_wait on it.
+   - How can a process get the exitcode of the child process?
+     A hash table is maintained by the kernel, which maps the tid to the
+     corresponding exitcode. For the details, see the next entry.
+   - How is the hash table maintained?
+     In short, when a process is created, it is added into the hash table;
+     when it exits, it update its exitcode which is contained in the entry
+     and remove its children's entries.
+         Note that the purpose of this hash table is to provide a way for
+     parent process to determine the status of a child process. This is the
+     reason why we remove children's entries, instead of the process's.
+         To avoid the invalidation of pointers which may occur when we expand
+     the hash table, the table store the pointers to the entries, instead of
+     the entries themselves.
+   - How process_wait is implemented?
+     First, we shall determine whether the provided tid is valid. After that,
+     we acquire the lock of the hash table and find the entry (pointer) we
+     want. Now we can release the lock since the change of the structure of
+     the hash table will never affect the content of the entry. Then, we
+     acquire the lock of that entry, check the exitcode and return or wait
+     on the conditonal variable depending on the result.
+   */
+
+#define STATUS_RUNNING -256
+
+/* The hash table from tids to status */
+struct hash_entry
+  {
+    tid_t tid;
+    int exitcode;
+    struct condition cv;
+    struct lock lk;
+  };
+
+struct lock hash_table_lock;
+size_t hash_table_capacity;
+size_t hash_table_size;
+static struct hash_entry **hash_table;
+
+static void
+init_hash_table ()
+{
+  hash_table_size = 0;
+  hash_table_capacity = 8;
+  hash_table = malloc (sizeof (struct hash_entry*) * hash_table_capacity);
+  for (int i = 0; i < hash_table_capacity; ++i)
+    hash_table[i] = NULL;
+  lock_init (&hash_table_lock);
+}
+
+static struct hash_entry*
+tid_to_hash_entry (tid_t tid)
+{
+  ASSERT (tid >= 0)
+
+  int i = tid % hash_table_capacity;
+  while (hash_table[i] != NULL && hash_table[i]->tid != tid)
+    {
+      i = hash_table_capacity - 1 ? 0 : i + 1;
+    }
+  return hash_table[i];
+}
+
+static struct hash_entry*
+make_hash_entry(tid_t tid)
+{
+  struct hash_entry* res = malloc (sizeof (struct hash_entry));
+  res->tid = tid;
+  res->exitcode = STATUS_RUNNING;
+  cond_init (&res->cv);
+  lock_init (&res->lk);
+  return res;
+}
+
+static void
+insert_hash_entry (tid_t tid, struct hash_entry *entry)
+{
+  ASSERT (tid_to_hash_entry (tid) == NULL)
+  if (hash_table_size > hash_table_capacity / 2)
+    {
+      struct hash_entry** old_table = hash_table;
+      hash_table =
+          malloc (sizeof (struct hash_entry *) * hash_table_capacity * 2);
+      for (int i = 0; i < hash_table_capacity * 2; ++i)
+        hash_table[i] = NULL;
+
+      hash_table_capacity *= 2;
+      hash_table_size = 0;
+
+      for (int i = 0; i < hash_table_capacity / 2; ++i)
+        {
+          if (old_table[i] == NULL)
+            continue;
+          insert_hash_entry (old_table[i]->tid, old_table[i]);
+        }
+      free (old_table);
+    }
+
+  int i = tid % hash_table_capacity;
+  while (hash_table[i] != NULL)
+    i = hash_table_capacity - 1 ? 0 : i + 1;
+  hash_table[i] = entry;
+  ++hash_table_size;
+}
+
+static void
+erase_tid (tid_t tid)
+{
+  int i = tid % hash_table_capacity;
+  while (hash_table[i] != NULL && hash_table[i]->tid != tid)
+    i = hash_table_capacity - 1 ? 0 : i + 1;
+  ASSERT (hash_table[i]->tid == tid)
+  free (hash_table[i]);
+  hash_table[i] = NULL;
+}
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+void
+process_init ()
+{
+  init_hash_table ();
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -45,7 +178,30 @@ process_execute (const char *cmd)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (cmd, PRI_DEFAULT, start_process, cmd_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (cmd_copy);
+      palloc_free_page (cmd_copy);
+
+  lock_acquire (&hash_table_lock);
+  insert_hash_entry (tid, make_hash_entry (tid));
+  lock_release (&hash_table_lock);
+
+  struct thread *pnt = thread_current ();
+  if (pnt->children_array_capacity == 0)  /* main */
+    {
+      pnt->children_array_capacity = 4;
+      pnt->children_processes =
+          malloc (pnt->children_array_capacity * sizeof (tid_t));
+    }
+  if (pnt->children_array_capacity == pnt->children_number)
+    {
+      tid_t *old = pnt->children_processes;
+      pnt->children_processes = malloc (pnt->children_array_capacity * 2);
+      for (int i = 0; i < pnt->children_array_capacity; ++i)
+        pnt->children_processes[i] = old[i];
+      pnt->children_array_capacity *= 2;
+      free (old);
+    }
+  pnt->children_processes[pnt->children_number++] = tid;
+
   return tid;
 }
 
@@ -67,8 +223,12 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (!success)
+    {
+      thread_current ()->exitcode = -1;
+      thread_exit ();
+    }
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -92,9 +252,36 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  timer_msleep(1 * 1000);
-  /* while (true) {} */
-  return -1;
+  /* Check the validation of child_tid */
+  struct thread * cur = thread_current ();
+  bool found = false;
+  for (int i = 0; i < cur->children_number; ++i)
+    {
+      if (cur->children_processes[i] == child_tid)
+        {
+          found = true;
+          break;
+        }
+    }
+  if (!found)
+    return -1;
+
+  /* Wait */
+  lock_acquire (&hash_table_lock);
+  struct hash_entry *entry = tid_to_hash_entry (child_tid);
+  lock_release (&hash_table_lock);
+
+  lock_acquire (&entry->lk);
+  while (entry->exitcode == STATUS_RUNNING)
+    {
+      ASSERT (intr_get_level () == INTR_ON)
+      cond_wait (&entry->cv, &entry->lk);
+    }
+  int exitcode = entry->exitcode;
+  entry->exitcode = -1;
+  lock_release (&entry->lk);
+
+  return exitcode;
 }
 
 /* Free the current process's resources. */
@@ -104,15 +291,37 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  // printf ("[DEBUG] process_exit: %d\n", cur->tid);
+
   /* Close opened files and free file_descriptors. */
-  struct list * fd_list = &cur->file_descriptors;
-  while (!list_empty(fd_list)) {
-    struct list_elem * e = list_pop_front(fd_list);
-    struct file_descriptor * fd = list_entry(e, struct file_descriptor, elem);
-    /* TODO: need fs_lock here */
-    file_close(fd->file);
-    free(fd);
-  }
+//  struct list * fd_list = &cur->file_descriptors;
+//  while (!list_empty(fd_list))
+//    {
+//      struct list_elem * e = list_front (fd_list);
+//      struct file_descriptor * fd = list_entry(e, struct file_descriptor, elem);
+//      list_pop_front(fd_list);
+//      /* TODO: need fs_lock here */
+//      file_close(fd->file);
+//      free(fd);
+//    }
+
+  /* Update the hash table */
+  lock_acquire (&hash_table_lock);
+  struct hash_entry *entry = tid_to_hash_entry (cur->tid);
+  for (int i = 0; i < cur->children_number; ++i)
+    erase_tid (cur->children_processes[i]);
+  lock_release (&hash_table_lock);
+
+  /* Note that if the parent process has exited, the entry of this
+     process will have been removed. */
+  if (entry)
+    {
+      lock_acquire (&entry->lk);
+      ASSERT (entry->exitcode == STATUS_RUNNING)
+      entry->exitcode = cur->exitcode;
+      cond_broadcast (&entry->cv, &entry->lk);
+      lock_release (&entry->lk);
+    }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -224,7 +433,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
-  // printf ("[DEBUG] Loading...\n");
+  // printf ("[DEBUG] Loading %s... \n", file_name);
 
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -245,6 +454,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
     {
       exe_name[i] = file_name[i];
     }
+  exe_name[i] = 0;
+  strlcpy (t->exe_name, exe_name, 64);
 
   file = filesys_open (exe_name);
   if (file == NULL) 
@@ -332,7 +543,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Parse the command line arguments */
   {
-    const int MAX_ARGC = 16;
+    const int MAX_ARGC = 128;  // TODO
     const int MAX_FILE_NAME_LEN = 128;
     int file_name_len = strlen (file_name);
     ASSERT (file_name_len <= MAX_FILE_NAME_LEN)
@@ -350,8 +561,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
           ASSERT (argc <= MAX_ARGC)
         }
     }
-
-    // printf ("[DEBUG] argc = %d\n", argc);
 
     *esp = (char *)(*esp) - ((uintptr_t)(*esp) % 4);  /* alignment */
 

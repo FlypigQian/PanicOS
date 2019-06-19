@@ -12,16 +12,18 @@
 #include "pagedir.h"
 
 #include "devices/shutdown.h"
+#include "filesys/filesys.h"
 #include "process.h"
+#include "threads/synch.h"
 #include "user/syscall.h"
 
-
 /* Ensure only one thread at a time is accessing file system. */
-struct lock fs_lock;
+static struct lock fs_lock;
 
 static void syscall_handler (struct intr_frame *);
 
-
+/* TODO: this check may be wrong */
+static void check_legal (const void *uaddr);
 
 void
 syscall_init (void) 
@@ -38,7 +40,7 @@ static int sys_open (const char *file);
 
 static int sys_filesize (int fd_id);
 
-static int sys_read(int fd_id, void *buffer, unsigned length);
+static int sys_read (int fd_id, void *buffer, unsigned length);
 
 static int sys_write (int fd_id, const void *buffer, unsigned length);
 
@@ -48,14 +50,79 @@ static unsigned sys_tell (int fd_id);
 
 static void sys_close (int fd_id);
 
-static void sys_exit (int status);
-
-static pid_t sys_exec (const char *cmd_line) {
-
+static void
+sys_exit (int status) {
+  thread_current ()->exitcode = status;
+  printf ("%s: exit(%d)\n", thread_current ()->exe_name, status);
+  thread_exit ();
 }
 
-/* TODO: this check may be wrong */
-static void check_legal (const void *uaddr);
+static int
+sys_wait (pid_t pid)
+{
+  return process_wait (pid);
+}
+
+static pid_t
+sys_exec (const char *cmd_line)
+{
+  check_legal (cmd_line);
+  check_legal (cmd_line + 1);
+  check_legal (cmd_line + 2);
+  check_legal (cmd_line + 3);
+  pid_t pid = process_execute (cmd_line);
+  if (pid == TID_ERROR)
+    sys_exit (-1);
+  return pid;
+}
+
+
+/* Retrieve the system call number and arguments from the stack. The
+   number and arguments will be put in ARGS, and the size of ARGS
+   will be returned. */
+static int
+read_sys_call_args(const char *esp, int32_t args[]) {
+  int argc;
+  check_legal (esp);
+
+  int sys_num = *(int*)esp;
+  switch (sys_num)
+    {
+      case SYS_HALT:
+        argc = 1;
+        break;
+      case SYS_EXIT:
+      case SYS_EXEC:
+      case SYS_WAIT:
+      case SYS_REMOVE:
+      case SYS_OPEN:
+      case SYS_FILESIZE:
+      case SYS_TELL:
+      case SYS_CLOSE:
+        argc = 2;
+        break;
+      case SYS_CREATE:
+      case SYS_SEEK:
+        argc = 3;
+        break;
+      case SYS_READ:
+      case SYS_WRITE:
+        argc = 4;
+        break;
+      default:
+        ASSERT (false && "Unknown system call")
+    }
+
+  for (int i = 0; i < argc; ++i)
+    {
+      const int32_t *addr = (const int32_t *)(esp + 4 * i);
+      check_legal (addr);
+      args[i] = *addr;
+    }
+
+  return argc;
+}
+
 
 static int get_user (const uint8_t *uaddr);
 
@@ -67,108 +134,65 @@ static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
   char * esp = f->esp;
-  int sys_num = *(int*)esp;
-  /*printf("[DEBUG]sys_num = %d\n ", sys_num);*/
+
+  int32_t args[4];
+  int argc = read_sys_call_args (esp, args);
+  ASSERT (argc <= 4)
+
+  int sys_num = args[0];
+
   switch (sys_num)
     {
       case SYS_HALT:
-        {
-          shutdown_power_off();
-          NOT_REACHED ();
-        }
+        shutdown_power_off ();
+        NOT_REACHED ()
       case SYS_EXIT:
-        {
-          // printf ("[DEBUG] SYS_EXIT\n");
-          sys_exit(*(int *) (esp + 4));
-          break;
-        }
+        sys_exit (args[1]);
+        return;
+      case SYS_EXEC:
+        f->eax = sys_exec ((const char *)args[1]);
+        return;
+      case SYS_WAIT:
+        f->eax = sys_wait (args[1]);
+        return;
       case SYS_CREATE:
-        {
-          const char * file = *(char **)(esp + 4);
-          check_legal(file);
-          unsigned initial_size = *(unsigned *)(esp + 8);
-          f->eax = (uint32_t) sys_create(file, initial_size);
-          break;
-        }
+        f->eax = sys_create ((const char *)args[1], args[2]);
+        return;
       case SYS_REMOVE:
-        {
-          const char * file = *(char **)(esp + 4);
-          check_legal(file);
-          f->eax = (uint32_t) sys_remove(file);
-          break;
-        }
+        f->eax = sys_remove ((const char *)args[1]);
+        return;
       case SYS_OPEN:
-        {
-          const char * file = *(char **)(esp + 4);
-          check_legal(file);
-          f->eax = (uint32_t) sys_open(file);
-          break;
-        }
+        f->eax = sys_open ((const char *)args[1]);
+        return;
       case SYS_FILESIZE:
-        {
-          int fd_id = *(int *)(esp + 4);
-          f->eax = (uint32_t) sys_filesize(fd_id);
-          break;
-        }
+        f->eax = sys_filesize (args[1]);
+        return;
       case SYS_READ:
-        {
-          int fd_id = *(int *)(esp + 4);
-          void * buffer = *(void **)(esp + 8);
-          check_legal(buffer);
-          unsigned length = *(unsigned *)(esp + 12);
-          check_legal((uint8_t *) buffer + length - 1);
-          f->eax = (uint32_t) sys_read(fd_id, buffer, length);
-          break;
-        }
+        f->eax = sys_read (args[1], (void *)args[2], args[3]);
+        return;
       case SYS_WRITE:
-        {
-          // printf ("[DEBUG] SYS_WRITE\n");
-          int fd_id = *(int *)(esp + 4);
-          const void *buffer = *(void **)(esp + 8);
-          check_legal(buffer);
-          unsigned length = *(unsigned *)(esp + 12);
-          check_legal((const uint8_t *) buffer + length - 1);
-          f->eax = (uint32_t) sys_write (fd_id, buffer, length);
-          break;
-        }
+        f->eax = sys_write (args[1], (void *)args[2], args[3]);
+        return;
       case SYS_SEEK:
-        {
-          int fd_id = *(int *)(esp + 4);
-          unsigned position = *(unsigned *)(esp + 8);
-          sys_seek(fd_id, position);
-          break;
-        }
+        sys_seek (args[1], args[2]);
+        return;
       case SYS_TELL:
-        {
-          int fd_id = *(int *)(esp + 4);
-          f->eax = (uint32_t) sys_tell(fd_id);
-          break;
-        }
+        f->eax = sys_tell (args[1]);
+        return;
       case SYS_CLOSE:
-        {
-          int fd_id = *(int *)(esp + 4);
-          sys_close(fd_id);
-          break;
-        }
+        sys_close (args[1]);
+        return;
       default:
         ASSERT (false)
     }
   /* thread_exit (); */
 }
 
-static void sys_exit (int status)
-{
-  // printf ("[DEBUG] sys_exit with status = %d\n", status);
-  // TODO
-  printf ("%s: exit(%d)\n", thread_current ()->name, status);
-
-  thread_exit ();
-}
-
 
 bool
 sys_create (const char *file, unsigned initial_size)
 {
+  check_legal (file);
   bool success;
   lock_acquire(&fs_lock);
   success = filesys_create(file, initial_size);
@@ -179,6 +203,7 @@ sys_create (const char *file, unsigned initial_size)
 bool
 sys_remove (const char *file)
 {
+  check_legal (file);
   bool success;
   lock_acquire(&fs_lock);
   success = filesys_remove(file);
@@ -189,6 +214,8 @@ sys_remove (const char *file)
 int
 sys_open (const char *file)
 {
+  check_legal (file);
+
   struct file * f;
   struct file_descriptor * fd = malloc(sizeof(struct file_descriptor));
   if (!fd)
@@ -228,6 +255,9 @@ sys_filesize (int fd_id)
 int
 sys_read(int fd_id, void *buffer, unsigned length)
 {
+  check_legal(buffer);
+  check_legal((uint8_t *) buffer + length - 1);
+
   if (fd_id == STDIN_FILENO)
     {
       uint8_t * udst = (uint8_t *) buffer;
@@ -257,6 +287,9 @@ sys_read(int fd_id, void *buffer, unsigned length)
 int
 sys_write (int fd_id, const void *buffer, unsigned length)
 {
+  check_legal(buffer);
+  check_legal((uint8_t *) buffer + length - 1);
+
   if (fd_id == STDIN_FILENO) {
     return -1;
   }
@@ -317,8 +350,6 @@ sys_close (int fd_id)
   free(fd);
 }
 
-
-/*************************** Auxiliary Functions *****************************/
 
 /* TODO: this check may be wrong */
 void

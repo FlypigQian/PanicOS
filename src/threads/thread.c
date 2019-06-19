@@ -15,6 +15,7 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "malloc.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -112,6 +113,8 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  initial_thread->children_number = 0;
+  initial_thread->children_array_capacity = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -196,24 +199,29 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
 
-	/* Task 1
-		Initialize task 1's snap_ticks to be 0, not in sleep state */
-	t->snap_ticks = 0;
-	/* Task 2 */
-	t->base_priority = priority;
-	t->donate_priority = PRI_MIN;
-	list_init(&t->locks_acquired);
-	t->lock_waiting = NULL;
-	/* Task 3.
-	 * new thread's nice and recent_cpu are inherited from parent */
-	t->nice = thread_current()->nice;
-	t->recent_cpu = thread_current()->recent_cpu;
+  /* Task 1
+      Initialize task 1's snap_ticks to be 0, not in sleep state */
+  t->snap_ticks = 0;
+  /* Task 2 */
+  t->base_priority = priority;
+  t->donate_priority = PRI_MIN;
+  list_init(&t->locks_acquired);
+  t->lock_waiting = NULL;
+  /* Task 3.
+   * new thread's nice and recent_cpu are inherited from parent */
+  t->nice = thread_current()->nice;
+  t->recent_cpu = thread_current()->recent_cpu;
 
 #ifdef USERPROG
 	list_init(&t->file_descriptors);
 #endif
 
   tid = t->tid = allocate_tid ();
+
+  /* Children processes */
+  t->children_number = 0;
+  t->children_array_capacity = 4;
+  t->children_processes = malloc (t->children_array_capacity * sizeof (tid_t));
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -711,36 +719,34 @@ thread_recent_cpu_update (struct thread *t, void *aux UNUSED) {
 /* Task 3 */
 void
 thread_priority_update (struct thread *t, void *aux) {
-	ASSERT(thread_mlfqs);
+  ASSERT(thread_mlfqs);
 
-	if (t == idle_thread)
-		return ;
+  if (t == idle_thread)
+      return ;
 
-	int priority = FINT_NEAR(
-		FSUB(
-			FSUB(
-				FIXED(PRI_MAX),
-				FDIV_INT(t->recent_cpu, 4)
-			),
-			FMUL_INT(FIXED(t->nice), 2)
-		)
-	);
+  int priority = FINT_NEAR(
+      FSUB(
+          FSUB(
+              FIXED(PRI_MAX),
+              FDIV_INT(t->recent_cpu, 4)
+          ),
+          FMUL_INT(FIXED(t->nice), 2)
+      )
+  );
 
-	int old = priority;
+  int old = priority;
 
-	priority = MAX (priority, PRI_MIN);
-	priority = MIN (priority, PRI_MAX);
+  priority = MAX (priority, PRI_MIN);
+  priority = MIN (priority, PRI_MAX);
 
-//	printf("%s update old %d raw %d, new %d recent_cpu %d, nice %d \n", thread_current()->name, thread_current()->priority, old, priority,
-//																																			FINT_ZERO(t->recent_cpu), FINT_ZERO(t->nice));
+  t->priority = priority;
 
-	t->priority = priority;
-
-	// put thread well away in ready queue.
-	if (t->status == THREAD_READY) {
-		list_remove(&t->elem);
-		list_push_back(ready_lists + t->priority, &t->elem);
-	}
+  // put thread well away in ready queue.
+  if (t->status == THREAD_READY)
+    {
+      list_remove(&t->elem);
+      list_push_back(ready_lists + t->priority, &t->elem);
+    }
 }
 
 /* Task 3 */
