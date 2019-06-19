@@ -105,8 +105,8 @@ thread_init (void)
   list_init (&ready_list);
   list_init (&all_list);
   /* Task 3 */
-	for (int i = PRI_MIN; i <= PRI_MAX; ++i)
-		list_init(ready_lists + i);
+  for (int i = PRI_MIN; i <= PRI_MAX; ++i)
+      list_init(ready_lists + i);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -115,6 +115,8 @@ thread_init (void)
   initial_thread->tid = allocate_tid ();
   initial_thread->children_number = 0;
   initial_thread->children_array_capacity = 0;
+  initial_thread->children_processes = NULL;
+  list_init (&initial_thread->file_descriptors);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.

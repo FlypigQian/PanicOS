@@ -53,7 +53,6 @@ static void sys_close (int fd_id);
 static void
 sys_exit (int status) {
   thread_current ()->exitcode = status;
-  printf ("%s: exit(%d)\n", thread_current ()->exe_name, status);
   thread_exit ();
 }
 
@@ -72,7 +71,7 @@ sys_exec (const char *cmd_line)
   check_legal (cmd_line + 3);
   pid_t pid = process_execute (cmd_line);
   if (pid == TID_ERROR)
-    sys_exit (-1);
+    return -1;
   return pid;
 }
 
@@ -84,6 +83,9 @@ static int
 read_sys_call_args(const char *esp, int32_t args[]) {
   int argc;
   check_legal (esp);
+  check_legal (esp + 1);
+  check_legal (esp + 2);
+  check_legal (esp + 3);
 
   int sys_num = *(int*)esp;
   switch (sys_num)
@@ -113,13 +115,16 @@ read_sys_call_args(const char *esp, int32_t args[]) {
         ASSERT (false && "Unknown system call")
     }
 
+
   for (int i = 0; i < argc; ++i)
     {
       const int32_t *addr = (const int32_t *)(esp + 4 * i);
       check_legal (addr);
+      check_legal (addr + 1);
+      check_legal (addr + 2);
+      check_legal (addr + 3);
       args[i] = *addr;
     }
-
   return argc;
 }
 
@@ -140,6 +145,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   ASSERT (argc <= 4)
 
   int sys_num = args[0];
+  // printf ("[DEBUG] sys_num = %d\n", sys_num);
 
   switch (sys_num)
     {
@@ -299,9 +305,6 @@ sys_write (int fd_id, const void *buffer, unsigned length)
       putbuf ((char *)buffer, length);
       return length;
     }
-
-  /* printf ("fd = %d\n", fd_id); */
-  /* ASSERT (false && "fd should be 1") */
 
   int size;
   struct file_descriptor * fd = get_file_descriptor(thread_current(), fd_id);

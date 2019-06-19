@@ -112,6 +112,7 @@ struct thread
 
     /* List of file_descriptors the thread owns */
     struct list file_descriptors;
+    struct file * executable_file;
 #endif
 
     /* Owned by thread.c. */

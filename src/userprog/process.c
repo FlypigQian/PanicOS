@@ -53,10 +53,11 @@
      want. Now we can release the lock since the change of the structure of
      the hash table will never affect the content of the entry. Then, we
      acquire the lock of that entry, check the exitcode and return or wait
-     on the conditonal variable depending on the result.
+     on the conditional variable depending on the result.
    */
 
 #define STATUS_RUNNING -256
+#define STATUS_ERROR -257
 
 /* The hash table from tids to status */
 struct hash_entry
@@ -68,6 +69,7 @@ struct hash_entry
   };
 
 struct lock hash_table_lock;
+struct condition hash_table_cv;
 size_t hash_table_capacity;
 size_t hash_table_size;
 static struct hash_entry **hash_table;
@@ -78,9 +80,11 @@ init_hash_table ()
   hash_table_size = 0;
   hash_table_capacity = 8;
   hash_table = malloc (sizeof (struct hash_entry*) * hash_table_capacity);
+  ASSERT (hash_table)
   for (int i = 0; i < hash_table_capacity; ++i)
     hash_table[i] = NULL;
   lock_init (&hash_table_lock);
+  cond_init (&hash_table_cv);
 }
 
 static struct hash_entry*
@@ -100,6 +104,7 @@ static struct hash_entry*
 make_hash_entry(tid_t tid)
 {
   struct hash_entry* res = malloc (sizeof (struct hash_entry));
+  ASSERT (res)
   res->tid = tid;
   res->exitcode = STATUS_RUNNING;
   cond_init (&res->cv);
@@ -107,7 +112,7 @@ make_hash_entry(tid_t tid)
   return res;
 }
 
-static void
+static bool
 insert_hash_entry (tid_t tid, struct hash_entry *entry)
 {
   ASSERT (tid_to_hash_entry (tid) == NULL)
@@ -116,6 +121,7 @@ insert_hash_entry (tid_t tid, struct hash_entry *entry)
       struct hash_entry** old_table = hash_table;
       hash_table =
           malloc (sizeof (struct hash_entry *) * hash_table_capacity * 2);
+      ASSERT (hash_table)
       for (int i = 0; i < hash_table_capacity * 2; ++i)
         hash_table[i] = NULL;
 
@@ -126,7 +132,8 @@ insert_hash_entry (tid_t tid, struct hash_entry *entry)
         {
           if (old_table[i] == NULL)
             continue;
-          insert_hash_entry (old_table[i]->tid, old_table[i]);
+          bool res = insert_hash_entry (old_table[i]->tid, old_table[i]);
+          ASSERT (res)
         }
       free (old_table);
     }
@@ -136,6 +143,7 @@ insert_hash_entry (tid_t tid, struct hash_entry *entry)
     i = hash_table_capacity - 1 ? 0 : i + 1;
   hash_table[i] = entry;
   ++hash_table_size;
+  return true;
 }
 
 static void
@@ -177,12 +185,18 @@ process_execute (const char *cmd)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (cmd, PRI_DEFAULT, start_process, cmd_copy);
-  if (tid == TID_ERROR)
-      palloc_free_page (cmd_copy);
 
   lock_acquire (&hash_table_lock);
-  insert_hash_entry (tid, make_hash_entry (tid));
+  while (tid_to_hash_entry (tid) == NULL)
+    cond_wait (&hash_table_cv, &hash_table_lock);
+  int status = tid_to_hash_entry (tid)->exitcode;
   lock_release (&hash_table_lock);
+
+  if (status == STATUS_ERROR)
+    return TID_ERROR;
+
+  if (tid == TID_ERROR)
+      palloc_free_page (cmd_copy);
 
   struct thread *pnt = thread_current ();
   if (pnt->children_array_capacity == 0)  /* main */
@@ -190,11 +204,15 @@ process_execute (const char *cmd)
       pnt->children_array_capacity = 4;
       pnt->children_processes =
           malloc (pnt->children_array_capacity * sizeof (tid_t));
+      ASSERT (pnt->children_processes)
     }
+  ASSERT (pnt->children_number <= pnt->children_array_capacity)
   if (pnt->children_array_capacity == pnt->children_number)
     {
       tid_t *old = pnt->children_processes;
-      pnt->children_processes = malloc (pnt->children_array_capacity * 2);
+      pnt->children_processes =
+          malloc (sizeof (tid_t) * pnt->children_array_capacity * 2);
+      ASSERT (pnt->children_processes)
       for (int i = 0; i < pnt->children_array_capacity; ++i)
         pnt->children_processes[i] = old[i];
       pnt->children_array_capacity *= 2;
@@ -223,12 +241,21 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
+  struct thread * cur = thread_current ();
+  struct hash_entry * entry = make_hash_entry (cur->tid);
   if (!success)
     {
-      thread_current ()->exitcode = -1;
-      thread_exit ();
+      cur->exitcode = STATUS_ERROR;
+      entry->exitcode = STATUS_ERROR;
     }
+  lock_acquire (&hash_table_lock);
+  bool insert_success = insert_hash_entry (cur->tid, entry);
+  ASSERT (insert_success)
+  cond_broadcast (&hash_table_cv, &hash_table_lock);
+  lock_release (&hash_table_lock);
 
+  if (!success)
+    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -269,6 +296,7 @@ process_wait (tid_t child_tid UNUSED)
   /* Wait */
   lock_acquire (&hash_table_lock);
   struct hash_entry *entry = tid_to_hash_entry (child_tid);
+  ASSERT (entry)
   lock_release (&hash_table_lock);
 
   lock_acquire (&entry->lk);
@@ -291,21 +319,29 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  // printf ("[DEBUG] process_exit: %d\n", cur->tid);
+  if (strlen (cur->exe_name) && cur->exitcode != STATUS_ERROR)
+    printf ("%s: exit(%d)\n", cur->exe_name, cur->exitcode);
 
   /* Close opened files and free file_descriptors. */
-//  struct list * fd_list = &cur->file_descriptors;
-//  while (!list_empty(fd_list))
-//    {
-//      struct list_elem * e = list_front (fd_list);
-//      struct file_descriptor * fd = list_entry(e, struct file_descriptor, elem);
-//      list_pop_front(fd_list);
-//      /* TODO: need fs_lock here */
-//      file_close(fd->file);
-//      free(fd);
-//    }
+  struct list * fd_list = &cur->file_descriptors;
+  while (!list_empty(fd_list))
+    {
+      struct list_elem * e = list_front (fd_list);
+      struct file_descriptor *fd = list_entry(e, struct file_descriptor, elem);
+      list_pop_front(fd_list);
+      /* TODO: need fs_lock here */
+      file_close(fd->file);
+      free(fd);
+    }
 
   /* Update the hash table */
+  if (lock_held_by_current_thread (&hash_table_lock))
+    {
+      printf ("[DEBUG] %s, pid = %d\n", cur->exe_name, cur->tid);
+      thread_current ();
+      debug_backtrace_all ();
+      ASSERT (false)
+    }
   lock_acquire (&hash_table_lock);
   struct hash_entry *entry = tid_to_hash_entry (cur->tid);
   for (int i = 0; i < cur->children_number; ++i)
@@ -317,7 +353,8 @@ process_exit (void)
   if (entry)
     {
       lock_acquire (&entry->lk);
-      ASSERT (entry->exitcode == STATUS_RUNNING)
+      ASSERT (entry->exitcode == STATUS_RUNNING ||
+              entry->exitcode == STATUS_ERROR)
       entry->exitcode = cur->exitcode;
       cond_broadcast (&entry->cv, &entry->lk);
       lock_release (&entry->lk);
@@ -339,6 +376,8 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  file_close (cur->executable_file);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -587,8 +626,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
-  // printf ("[DEBUG] Load ended.\n");
+  if (success)
+    file_deny_write (file);
+  thread_current ()->executable_file = file;
+
   return success;
 }
 
