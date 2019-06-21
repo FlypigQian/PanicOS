@@ -59,6 +59,8 @@
 #define STATUS_RUNNING -256
 #define STATUS_ERROR -257
 
+extern struct lock fs_lock;  // TODO
+
 /* The hash table from tids to status */
 struct hash_entry
   {
@@ -173,6 +175,7 @@ process_init ()
 tid_t
 process_execute (const char *cmd)
 {
+  // printf ("[DEBUG] process_execute %s\n", cmd);
   char *cmd_copy;
   tid_t tid;
 
@@ -329,15 +332,16 @@ process_exit (void)
       struct list_elem * e = list_front (fd_list);
       struct file_descriptor *fd = list_entry(e, struct file_descriptor, elem);
       list_pop_front(fd_list);
-      /* TODO: need fs_lock here */
+      lock_acquire (&fs_lock);
       file_close(fd->file);
+      lock_release (&fs_lock);
       free(fd);
     }
 
   /* Update the hash table */
   if (lock_held_by_current_thread (&hash_table_lock))
     {
-      printf ("[DEBUG] %s, pid = %d\n", cur->exe_name, cur->tid);
+      // printf ("[DEBUG] %s, pid = %d\n", cur->exe_name, cur->tid);
       thread_current ();
       debug_backtrace_all ();
       ASSERT (false)
@@ -352,6 +356,9 @@ process_exit (void)
      process will have been removed. */
   if (entry)
     {
+      lock_acquire (&fs_lock);
+      file_close (cur->executable_file);
+      lock_release (&fs_lock);
       lock_acquire (&entry->lk);
       ASSERT (entry->exitcode == STATUS_RUNNING ||
               entry->exitcode == STATUS_ERROR)
@@ -376,8 +383,6 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-
-  file_close (cur->executable_file);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -497,7 +502,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   strlcpy (t->exe_name, exe_name, 64);
 
   file = filesys_open (exe_name);
-  if (file == NULL) 
+  if (file == NULL)
     {
       printf ("load: %s: open failed\n", exe_name);
       goto done; 

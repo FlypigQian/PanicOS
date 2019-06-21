@@ -113,10 +113,12 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+#ifdef USERPROG
   initial_thread->children_number = 0;
   initial_thread->children_array_capacity = 0;
   initial_thread->children_processes = NULL;
   list_init (&initial_thread->file_descriptors);
+#endif
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -214,16 +216,15 @@ thread_create (const char *name, int priority,
   t->nice = thread_current()->nice;
   t->recent_cpu = thread_current()->recent_cpu;
 
-#ifdef USERPROG
-	list_init(&t->file_descriptors);
-#endif
-
   tid = t->tid = allocate_tid ();
 
+#ifdef USERPROG
+  list_init(&t->file_descriptors);
   /* Children processes */
   t->children_number = 0;
   t->children_array_capacity = 4;
   t->children_processes = malloc (t->children_array_capacity * sizeof (tid_t));
+#endif
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);

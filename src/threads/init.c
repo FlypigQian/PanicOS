@@ -105,13 +105,12 @@ pintos_init (void)
   malloc_init ();
   paging_init ();
 
-  /* Processes */
-  process_init ();
-
   /* Segmentation. */
 #ifdef USERPROG
   tss_init ();
   gdt_init ();
+  /* Processes */
+  process_init ();
 #endif
 
   /* Initialize interrupt handlers. */

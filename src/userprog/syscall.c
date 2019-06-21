@@ -18,7 +18,7 @@
 #include "user/syscall.h"
 
 /* Ensure only one thread at a time is accessing file system. */
-static struct lock fs_lock;
+struct lock fs_lock;
 
 static void syscall_handler (struct intr_frame *);
 
@@ -69,7 +69,9 @@ sys_exec (const char *cmd_line)
   check_legal (cmd_line + 1);
   check_legal (cmd_line + 2);
   check_legal (cmd_line + 3);
+  lock_acquire (&fs_lock);
   pid_t pid = process_execute (cmd_line);
+  lock_release (&fs_lock);
   if (pid == TID_ERROR)
     return -1;
   return pid;
@@ -296,9 +298,10 @@ sys_write (int fd_id, const void *buffer, unsigned length)
   check_legal(buffer);
   check_legal((uint8_t *) buffer + length - 1);
 
-  if (fd_id == STDIN_FILENO) {
-    return -1;
-  }
+  if (fd_id == STDIN_FILENO)
+    {
+      return -1;
+    }
 
   if (fd_id == 1)
     {
@@ -309,7 +312,9 @@ sys_write (int fd_id, const void *buffer, unsigned length)
   int size;
   struct file_descriptor * fd = get_file_descriptor(thread_current(), fd_id);
   if (!fd)
-    return -1;
+    {
+      return -1;
+    }
   lock_acquire(&fs_lock);
   size = file_write(fd->file, buffer, length);
   lock_release(&fs_lock);

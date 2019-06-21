@@ -101,7 +101,7 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
-#ifdef USERPROG
+ #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     char exe_name[64];                  /* The name of the executable */
@@ -113,7 +113,7 @@ struct thread
     /* List of file_descriptors the thread owns */
     struct list file_descriptors;
     struct file * executable_file;
-#endif
+ #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
