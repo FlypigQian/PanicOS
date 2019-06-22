@@ -10,6 +10,6 @@ include_directories(src/lib)
 include_directories(src/lib/kernel)
 
 file(GLOB_RECURSE SRCS "src/*.c")
-add_library(kernel ${SRCS})
+add_library(kernel ${SRCS} src/vm/frame.h src/vm/frame.c src/vm/page.h src/vm/page.c src/vm/swap.h src/vm/swap.c)
 target_compile_definitions(kernel PRIVATE USERPROG)
 
