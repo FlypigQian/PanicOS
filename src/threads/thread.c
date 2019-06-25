@@ -119,6 +119,8 @@ thread_init (void)
   initial_thread->children_processes = NULL;
   list_init (&initial_thread->file_descriptors);
 #endif
+
+  list_init(&initial_thread->mmap_lsit);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -225,6 +227,8 @@ thread_create (const char *name, int priority,
   t->children_array_capacity = 4;
   t->children_processes = malloc (t->children_array_capacity * sizeof (tid_t));
 #endif
+
+  list_init(&t->mmap_lsit);
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);

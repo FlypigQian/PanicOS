@@ -341,6 +341,14 @@ process_exit (void)
       free(fd);
     }
 
+  struct list *mmap_list = &cur->mmap_lsit;
+  while (!list_empty(mmap_list))
+    {
+      struct list_elem *e = list_front(mmap_list);
+      struct mmap_info *mmap_info = list_entry(e, struct mmap_info, elem);
+      sys_munmap(mmap_info->id);
+    }
+
   /* Update the hash table */
   if (lock_held_by_current_thread (&hash_table_lock))
     {
@@ -792,6 +800,6 @@ install_page (void *upage, void *kpage, bool writable)
   if (!pagedir_set_page (t->pagedir, upage, kpage, writable))
     return false;
 
-  return set_supp_entry(&t->supp_page_table, upage, kpage);
+  return set_supp_frame_entry(&t->supp_page_table, upage, kpage, writable);
 
 }

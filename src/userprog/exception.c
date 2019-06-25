@@ -166,6 +166,7 @@ page_fault (struct intr_frame *f)
     }
 
   void *upage = pg_round_down(fault_addr);
+  ASSERT (pagedir_get_page(cur->pagedir, upage) == NULL);
   struct supp_entry *entry = get_supp_entry(&cur->supp_page_table, upage);
   if (entry == NULL)
     {
@@ -183,7 +184,7 @@ page_fault (struct intr_frame *f)
             {
               PANIC ("Can't set page in pagedir");
             }
-          if (!set_supp_entry(&cur->supp_page_table, upage, kpage))
+          if (!set_supp_frame_entry(&cur->supp_page_table, upage, kpage, true))
             {
               PANIC ("Can't set page in supp_page_table");
             }
@@ -200,6 +201,8 @@ page_fault (struct intr_frame *f)
   else
     {
       /* supp_entry exists but not on frame, should load page to frame */
+      if (load_page(entry))
+        return;
     }
 
   /* To implement virtual memory, delete the rest of the function

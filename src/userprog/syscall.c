@@ -6,6 +6,7 @@
 #include <threads/malloc.h>
 #include <filesys/file.h>
 #include <devices/input.h>
+#include <vm/page.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -51,6 +52,8 @@ static void sys_seek (int fd_id, unsigned position);
 static unsigned sys_tell (int fd_id);
 
 static void sys_close (int fd_id);
+
+static mapid_t sys_mmap (int fd_id, void *start_addr);
 
 static void
 sys_exit (int status) {
@@ -105,10 +108,12 @@ read_sys_call_args(const char *esp, int32_t args[]) {
       case SYS_FILESIZE:
       case SYS_TELL:
       case SYS_CLOSE:
+      case SYS_MUNMAP:
         argc = 2;
         break;
       case SYS_CREATE:
       case SYS_SEEK:
+      case SYS_MMAP:
         argc = 3;
         break;
       case SYS_READ:
@@ -137,7 +142,9 @@ static int get_user (const uint8_t *uaddr);
 
 static bool put_user (uint8_t *udst, uint8_t byte);
 
-static struct file_descriptor* get_file_descriptor(struct thread * t, int fd_id);
+static struct file_descriptor* get_file_descriptor(struct thread *t, int fd_id);
+
+static struct mmap_info* get_mmap_info(struct thread *t, int mapid);
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -193,6 +200,12 @@ syscall_handler (struct intr_frame *f UNUSED)
         return;
       case SYS_CLOSE:
         sys_close (args[1]);
+        return;
+      case SYS_MMAP:
+        f->eax = sys_mmap(args[1], (void *)args[2]);
+        return;
+      case SYS_MUNMAP:
+        sys_munmap(args[1]);
         return;
       default:
         ASSERT (false)
@@ -363,6 +376,88 @@ sys_close (int fd_id)
 }
 
 
+static mapid_t
+sys_mmap (int fd_id, void *start_addr)
+{
+  if (start_addr == NULL || pg_ofs(start_addr) != 0 || fd_id <= 1)
+    return -1;
+
+  struct thread *cur = thread_current();
+
+  lock_acquire(&fs_lock);
+  struct file_descriptor * fd = get_file_descriptor(cur, fd_id);
+  struct file * file = NULL;
+  if (fd && fd->file)
+    {
+      file = file_reopen(fd->file);
+    }
+  if (!file)
+    {
+      lock_release(&fs_lock);
+      return -1;
+    }
+
+  uint32_t length = (uint32_t) file_length(file);
+  lock_release(&fs_lock);
+
+  if (length == 0)
+      return -1;
+
+  for (uint32_t offset = 0; offset < length; offset += PGSIZE)
+    {
+      void *addr = start_addr + offset;
+      if (get_supp_entry(&cur->supp_page_table, addr) != NULL)
+          return -1;
+    }
+
+  for (uint32_t offset = 0; offset < length; offset += PGSIZE)
+    {
+      void *addr = start_addr + offset;
+      uint32_t read_bytes = offset + PGSIZE <= length ? PGSIZE : length - offset;
+      if (!set_supp_mmap_entry(&cur->supp_page_table, addr, file, offset, read_bytes))
+        PANIC ("set_supp_mmap_entry failed");
+    }
+
+  struct mmap_info *mmap_info = malloc(sizeof(struct mmap_info));
+
+  mapid_t mapid;
+  if (list_empty(&cur->mmap_lsit))
+    mapid = 1;
+  else
+    mapid = (list_entry(list_back(&cur->mmap_lsit), struct mmap_info, elem)->id) + 1;
+
+  mmap_info->id = mapid;
+  mmap_info->file = file;
+  mmap_info->start_addr = start_addr;
+  mmap_info->length = length;
+
+  list_push_back(&cur->mmap_lsit, &mmap_info->elem);
+
+  return mapid;
+}
+
+void
+sys_munmap (mapid_t mapid)
+{
+  struct thread *cur = thread_current();
+  struct mmap_info *mmap_info = get_mmap_info(cur, mapid);
+  if (mmap_info == NULL)
+    PANIC ("Can't find mmap_info");
+
+  lock_acquire(&fs_lock);
+  for (uint32_t offset = 0; offset < mmap_info->length; offset += PGSIZE)
+    {
+      void *addr = mmap_info->start_addr + offset;
+      unset_supp_mmap_entry(&cur->supp_page_table, addr);
+    }
+
+  file_close(mmap_info->file);
+  lock_release(&fs_lock);
+
+  list_remove(&mmap_info->elem);
+  free(mmap_info);
+}
+
 /* TODO: this check may be wrong */
 void
 check_legal (const void *uaddr)
@@ -401,7 +496,7 @@ put_user (uint8_t *udst, uint8_t byte)
 }
 
 struct file_descriptor*
-get_file_descriptor(struct thread * t, int fd_id)
+get_file_descriptor(struct thread *t, int fd_id)
 {
   ASSERT(t != NULL);
 
@@ -416,6 +511,22 @@ get_file_descriptor(struct thread * t, int fd_id)
       struct file_descriptor * fd = list_entry(e, struct file_descriptor, elem);
       if (fd->id == fd_id)
         return fd;
+    }
+  return NULL;
+}
+
+struct mmap_info*
+get_mmap_info(struct thread *t, int mapid)
+{
+  ASSERT (t != NULL);
+
+  struct list * mmap_list = &t->mmap_lsit;
+  struct list_elem * e;
+  for (e = list_begin(mmap_list); e != list_end(mmap_list); e = list_next(e))
+    {
+      struct mmap_info * mmap_info = list_entry(e, struct mmap_info, elem);
+      if (mmap_info->id == mapid)
+        return mmap_info;
     }
   return NULL;
 }

@@ -1,7 +1,7 @@
 #ifndef VM_SWAP_H
 #define VM_SWAP_H
 
-typedef size_t sid_t;
+typedef int32_t sid_t;
 
 /* Initialize the swap table. */
 void swap_init();
