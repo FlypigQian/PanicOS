@@ -1,5 +1,5 @@
-#ifndef SWAP_H
-#define SWAP_H
+#ifndef VM_SWAP_H
+#define VM_SWAP_H
 
 typedef size_t sid_t;
 
@@ -19,4 +19,4 @@ void swap_in(sid_t sid, void *upage);
 /* Free the 'sid'-th swap region. */
 void swap_free(sid_t sid);
 
-#endif //SWAP_H
+#endif //VM_SWAP_H

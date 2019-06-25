@@ -25,6 +25,8 @@ static void syscall_handler (struct intr_frame *);
 /* TODO: this check may be wrong */
 static void check_legal (const void *uaddr);
 
+static void check_valid(const void *uaddr);
+
 void
 syscall_init (void) 
 {
@@ -141,6 +143,8 @@ static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
   char * esp = f->esp;
+
+  thread_current()->user_esp = f->esp;
 
   int32_t args[4];
   int argc = read_sys_call_args (esp, args);
@@ -263,8 +267,8 @@ sys_filesize (int fd_id)
 int
 sys_read(int fd_id, void *buffer, unsigned length)
 {
-  check_legal(buffer);
-  check_legal((uint8_t *) buffer + length - 1);
+  check_valid(buffer);
+  check_valid((uint8_t *) buffer + length - 1);
 
   if (fd_id == STDIN_FILENO)
     {
@@ -366,6 +370,12 @@ check_legal (const void *uaddr)
   struct thread *cur = thread_current();
   if (uaddr == NULL || !is_user_vaddr(uaddr) ||
       (pagedir_get_page (cur->pagedir, uaddr)) == NULL)
+    sys_exit(-1);
+}
+
+void check_valid(const void *uaddr)
+{
+  if (uaddr == NULL || !is_user_vaddr(uaddr))
     sys_exit(-1);
 }
 

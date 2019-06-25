@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include <lib/debug.h>
+#include <lib/kernel/hash.h>
 #include <stdbool.h>
 #include "fixed_point.h"
 
@@ -113,6 +114,11 @@ struct thread
     /* List of file_descriptors the thread owns */
     struct list file_descriptors;
     struct file * executable_file;
+
+    struct hash supp_page_table;
+
+    /* The stack pointer of the user program. See 5.3.3 */
+    void *user_esp;
  #endif
 
     /* Owned by thread.c. */
