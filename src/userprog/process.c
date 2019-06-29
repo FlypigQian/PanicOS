@@ -254,7 +254,17 @@ start_process (void *file_name_)
   lock_acquire (&hash_table_lock);
   bool insert_success = insert_hash_entry (cur->tid, entry);
   ASSERT (insert_success)
-  cond_broadcast (&hash_table_cv, &hash_table_lock);
+
+	printf("see all threads\n");
+  thread_print_all();
+  printf("see threads waiting for the condition variable\n");
+  if (!list_empty(&hash_table_cv.waiters)) {
+	  for (struct list_elem *e = list_begin(&hash_table_cv.waiters); e != list_end(&hash_table_cv.waiters); e = e->next) {
+		  struct semaphore_elem *waiter_semaphore = list_entry(e, struct semaphore_elem, elem);
+		  thread_print_one(waiter_semaphore->wait_thread, NULL);
+	  }
+  }
+	cond_broadcast (&hash_table_cv, &hash_table_lock);
   lock_release (&hash_table_lock);
 
   if (!success)

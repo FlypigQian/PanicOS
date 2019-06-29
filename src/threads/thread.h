@@ -186,5 +186,5 @@ void thread_recent_cpu_update (struct thread *t, void *aux);
 void thread_priority_update (struct thread *t, void *aux);
 int thread_highest_ready_priority(void);
 void thread_print_all (void);
-
+void thread_print_one (struct thread*, void*);
 #endif /* threads/thread.h */

@@ -297,16 +297,6 @@ lock_held_by_current_thread (const struct lock *lock)
   return lock->holder == thread_current ();
 }
 
-/* One semaphore in a list.
- * Used exclusively for condition variable. */
-struct semaphore_elem 
-  {
-    struct list_elem elem;              /* List element. */
-    struct semaphore semaphore;         /* This semaphore. */
-		/* Task 2. thread waiting for the condition variable via this semaphore
-		 * wake up wait_thread with highest priority during cond_signal */
-    struct thread *wait_thread;
-  };
 
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating

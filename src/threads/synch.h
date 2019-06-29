@@ -51,6 +51,17 @@ bool list_less_cond_waiter_priority (const struct list_elem *a,
                                       const struct list_elem *b,
                                       void *aux);
 
+/* One semaphore in a list.
+ * Used exclusively for condition variable. */
+struct semaphore_elem
+{
+	struct list_elem elem;              /* List element. */
+	struct semaphore semaphore;         /* This semaphore. */
+	/* Task 2. thread waiting for the condition variable via this semaphore
+	 * wake up wait_thread with highest priority during cond_signal */
+	struct thread *wait_thread;
+};
+
 /* Optimization barrier.
 
    The compiler will not reorder operations across an
