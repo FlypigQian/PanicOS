@@ -6,6 +6,7 @@
 #include <string.h>
 #include <lib/kernel/list.h>
 #include <lib/debug.h>
+#include <vm/page.h>
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"

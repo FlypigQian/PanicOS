@@ -30,8 +30,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <lib/kernel/list.h>
+#include <vm/frame.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "filesys/filesys.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
 
 #define MAX(a,b)  (((a)>(b))?(a):(b))
 

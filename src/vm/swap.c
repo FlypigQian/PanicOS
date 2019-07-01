@@ -2,6 +2,8 @@
 #include <threads/vaddr.h>
 #include <threads/synch.h>
 #include <devices/block.h>
+#include <stdio.h>
+#include <threads/thread.h>
 #include "vm/swap.h"
 
 static const size_t SECTORS_PER_PAGE = PGSIZE / BLOCK_SECTOR_SIZE;
@@ -11,7 +13,6 @@ static struct block *swap_block;
 /* Record whether a swap region is available or occupied. */
 static struct bitmap *swap_map;
 
-static struct lock swap_lock;
 static size_t swap_size;
 
 void

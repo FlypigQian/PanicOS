@@ -26,4 +26,15 @@ void file_seek (struct file *, off_t);
 off_t file_tell (struct file *);
 off_t file_length (struct file *);
 
+struct file *fs_reopen (struct file *file);
+void fs_close (struct file *file);
+off_t fs_read (struct file *file, void *buffer, off_t size);
+off_t fs_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs);
+off_t fs_write (struct file *file, const void *buffer, off_t size);
+off_t fs_write_at (struct file *file, const void *buffer, off_t size, off_t file_ofs);
+void fs_deny_write (struct file *file);
+void fs_seek (struct file *file, off_t new_pos);
+off_t fs_tell (struct file *file);
+off_t fs_length (struct file *file);
+
 #endif /* filesys/file.h */

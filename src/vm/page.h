@@ -47,4 +47,6 @@ struct supp_entry* get_supp_entry(struct hash *supp_page_table, void *upage);
 
 bool load_page(struct supp_entry *entry);
 
+void evict_page(struct supp_entry *entry, uint32_t *pagedir);
+
 #endif //VM_PAGE_H

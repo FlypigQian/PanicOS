@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <vm/frame.h>
 #include <vm/page.h>
+#include <threads/synch.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -159,6 +160,8 @@ page_fault (struct intr_frame *f)
 
   void *esp = user ? f->esp : cur->user_esp;
 
+//  printf("[DEBUG]%d page_fault\n", thread_current()->tid);
+
   if (fault_addr == NULL || !is_user_vaddr(fault_addr) || !not_present)
     {
       cur->exitcode = -1;
@@ -170,16 +173,14 @@ page_fault (struct intr_frame *f)
   struct supp_entry *entry = get_supp_entry(&cur->supp_page_table, upage);
   if (entry == NULL)
     {
-//      int d1 = (int) ((char *) PHYS_BASE - (char *) esp);
-//      printf("[DEBUG] PHYS_BASE - esp is %d\n", d1);
-//      int d2 = (int)((char *) esp - (char *) fault_addr);
-//      printf("[DEBUG] esp - fault_addr is %d\n", d2);
       bool stack_access = (fault_addr >= esp || fault_addr == esp - 4 ||
               fault_addr == esp - 32) && fault_addr >= esp - MAX_STACK_SIZE;
       if (stack_access)
         {
           /* grow stack */
+          acquire_frame_lock();
           void *kpage = allocate_frame(PAL_USER, upage);
+          release_frame_lock();
           if (!pagedir_set_page(cur->pagedir, upage, kpage, true))
             {
               PANIC ("Can't set page in pagedir");
@@ -192,27 +193,31 @@ page_fault (struct intr_frame *f)
         }
       else
         {
-          /* invalid memory access */
-          // printf("[DEBUG] i am fhfeere\n");
           cur->exitcode = -1;
           thread_exit ();
+          printf ("[DEBUG]%d Page fault at %p: %s error %s page in %s context.\n",
+                  thread_current()->tid,
+                  fault_addr,
+                  not_present ? "not present" : "rights violation",
+                  write ? "writing" : "reading",
+                  user ? "user" : "kernel");
+          ASSERT (false)
         }
     }
   else
     {
-      /* supp_entry exists but not on frame, should load page to frame */
-      if (load_page(entry))
+      acquire_frame_lock();
+      ASSERT (entry->state != ON_FRAME);
+      bool success = load_page(entry);
+      release_frame_lock();
+      if (success)
         return;
     }
 
   /* To implement virtual memory, delete the rest of the function
   body, and replace it with code that brings in the page to
   which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
+
   kill (f);
 }
 

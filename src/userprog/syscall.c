@@ -17,9 +17,8 @@
 #include "process.h"
 #include "threads/synch.h"
 #include "user/syscall.h"
+#include "vm/frame.h"
 
-/* Ensure only one thread at a time is accessing file system. */
-struct lock fs_lock;
 
 static void syscall_handler (struct intr_frame *);
 
@@ -31,7 +30,6 @@ static void check_valid(const void *uaddr);
 void
 syscall_init (void) 
 {
-  lock_init(&fs_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -74,9 +72,7 @@ sys_exec (const char *cmd_line)
   check_legal (cmd_line + 1);
   check_legal (cmd_line + 2);
   check_legal (cmd_line + 3);
-  lock_acquire (&fs_lock);
   pid_t pid = process_execute (cmd_line);
-  lock_release (&fs_lock);
   if (pid == TID_ERROR)
     return -1;
   return pid;
@@ -146,6 +142,10 @@ static struct file_descriptor* get_file_descriptor(struct thread *t, int fd_id);
 
 static struct mmap_info* get_mmap_info(struct thread *t, int mapid);
 
+static void load_and_pin_buffer(const void *buffer, unsigned length);
+
+static void unpin_buffer(const void *buffer, unsigned length);
+
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
@@ -158,7 +158,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   ASSERT (argc <= 4)
 
   int sys_num = args[0];
-  // printf ("[DEBUG] sys_num = %d\n", sys_num);
+//   printf ("[DEBUG]%d sys_num = %d\n", thread_current()->tid, sys_num);
 
   switch (sys_num)
     {
@@ -219,9 +219,7 @@ sys_create (const char *file, unsigned initial_size)
 {
   check_legal (file);
   bool success;
-  lock_acquire(&fs_lock);
-  success = filesys_create(file, initial_size);
-  lock_release(&fs_lock);
+  success = fs_create(file, initial_size);
   return success;
 }
 
@@ -230,9 +228,7 @@ sys_remove (const char *file)
 {
   check_legal (file);
   bool success;
-  lock_acquire(&fs_lock);
-  success = filesys_remove(file);
-  lock_release(&fs_lock);
+  success = fs_remove(file);
   return success;
 }
 
@@ -246,9 +242,7 @@ sys_open (const char *file)
   if (!fd)
     return -1;
 
-  lock_acquire(&fs_lock);
-  f = filesys_open(file);
-  lock_release(&fs_lock);
+  f = fs_open(file);
   if (!f)
     {
       free(fd);
@@ -271,9 +265,7 @@ sys_filesize (int fd_id)
   struct file_descriptor * fd = get_file_descriptor(thread_current(), fd_id);
   if (!fd)
     return -1;
-  lock_acquire(&fs_lock);
-  size = file_length(fd->file);
-  lock_release(&fs_lock);
+  size = fs_length(fd->file);
   return size;
 }
 
@@ -303,9 +295,9 @@ sys_read(int fd_id, void *buffer, unsigned length)
   struct file_descriptor * fd = get_file_descriptor(thread_current(), fd_id);
   if (!fd)
     return -1;
-  lock_acquire(&fs_lock);
-  size = file_read(fd->file, buffer, length);
-  lock_release(&fs_lock);
+  load_and_pin_buffer(buffer, length);
+  size = fs_read(fd->file, buffer, length);
+  unpin_buffer(buffer, length);
   return size;
 }
 
@@ -332,9 +324,9 @@ sys_write (int fd_id, const void *buffer, unsigned length)
     {
       return -1;
     }
-  lock_acquire(&fs_lock);
-  size = file_write(fd->file, buffer, length);
-  lock_release(&fs_lock);
+  load_and_pin_buffer(buffer, length);
+  size = fs_write(fd->file, buffer, length);
+  unpin_buffer(buffer, length);
   return size;
 }
 
@@ -344,9 +336,7 @@ sys_seek (int fd_id, unsigned position)
   struct file_descriptor * fd = get_file_descriptor(thread_current(), fd_id);
   if (!fd)
     return;
-  lock_acquire(&fs_lock);
-  file_seek(fd->file, (off_t) position);
-  lock_release(&fs_lock);
+  fs_seek(fd->file, (off_t) position);
 }
 
 unsigned
@@ -356,9 +346,7 @@ sys_tell (int fd_id)
   struct file_descriptor * fd = get_file_descriptor(thread_current(), fd_id);
   if (!fd)
     return 0; /* TODO: here is improper */
-  lock_acquire(&fs_lock);
-  position = (unsigned) file_tell(fd->file);
-  lock_release(&fs_lock);
+  position = (unsigned) fs_tell(fd->file);
   return position;
 }
 
@@ -368,9 +356,7 @@ sys_close (int fd_id)
   struct file_descriptor * fd = get_file_descriptor(thread_current(), fd_id);
   if (!fd)
     return;
-  lock_acquire(&fs_lock);
-  file_close(fd->file);
-  lock_release(&fs_lock);
+  fs_close(fd->file);
   list_remove(&fd->elem);
   free(fd);
 }
@@ -384,21 +370,18 @@ sys_mmap (int fd_id, void *start_addr)
 
   struct thread *cur = thread_current();
 
-  lock_acquire(&fs_lock);
   struct file_descriptor * fd = get_file_descriptor(cur, fd_id);
   struct file * file = NULL;
   if (fd && fd->file)
     {
-      file = file_reopen(fd->file);
+      file = fs_reopen(fd->file);
     }
   if (!file)
     {
-      lock_release(&fs_lock);
       return -1;
     }
 
-  uint32_t length = (uint32_t) file_length(file);
-  lock_release(&fs_lock);
+  uint32_t length = (uint32_t) fs_length(file);
 
   if (length == 0)
       return -1;
@@ -444,15 +427,13 @@ sys_munmap (mapid_t mapid)
   if (mmap_info == NULL)
     PANIC ("Can't find mmap_info");
 
-  lock_acquire(&fs_lock);
   for (uint32_t offset = 0; offset < mmap_info->length; offset += PGSIZE)
     {
       void *addr = mmap_info->start_addr + offset;
       unset_supp_mmap_entry(&cur->supp_page_table, addr);
     }
 
-  file_close(mmap_info->file);
-  lock_release(&fs_lock);
+  fs_close(mmap_info->file);
 
   list_remove(&mmap_info->elem);
   free(mmap_info);
@@ -530,3 +511,46 @@ get_mmap_info(struct thread *t, int mapid)
     }
   return NULL;
 }
+
+static void
+load_and_pin_buffer(const void *buffer, unsigned length)
+{
+  struct thread *cur = thread_current();
+
+  const void *buffer_end = buffer + length;
+  for (void *upage = pg_round_down(buffer); upage < buffer_end; upage += PGSIZE)
+  {
+    if (get_user(upage) == -1)
+    {
+      sys_exit(-1);
+    }
+    struct supp_entry *entry = get_supp_entry(&cur->supp_page_table, upage);
+    ASSERT (entry != NULL);
+    acquire_frame_lock();
+    if (!load_page(entry))
+    {
+      PANIC ("Loading buffer failed");
+    }
+    ASSERT (entry->kpage != NULL);
+    pin_frame(entry->kpage);
+    release_frame_lock();
+  }
+}
+
+static void
+unpin_buffer(const void *buffer, unsigned length)
+{
+  struct thread *cur = thread_current();
+
+  const void *buffer_end = buffer + length;
+  for (void *upage = pg_round_down(buffer); upage < buffer_end; upage += PGSIZE)
+  {
+    struct supp_entry *entry = get_supp_entry(&cur->supp_page_table, upage);
+    acquire_frame_lock();
+    ASSERT (entry->state == ON_FRAME);
+    ASSERT (entry->kpage != NULL);
+    unpin_frame(entry->kpage);
+    release_frame_lock();
+  }
+}
+

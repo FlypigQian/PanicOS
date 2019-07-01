@@ -4,10 +4,10 @@
 #include <filesys/file.h>
 #include <stdio.h>
 #include <threads/synch.h>
+#include <filesys/filesys.h>
 #include "vm/page.h"
 #include "frame.h"
 
-extern struct lock fs_lock;
 
 static unsigned supp_hash_func (const struct hash_elem *e, void *aux);
 
@@ -44,12 +44,17 @@ set_supp_frame_entry(struct hash *supp_page_table,
 
   struct hash_elem *prev = hash_insert(supp_page_table, &entry->elem);
   if (prev == NULL)
-      return true;
+  {
+    acquire_frame_lock();
+    unpin_frame(kpage);
+    release_frame_lock();
+    return true;
+  }
   else
-    {
-      free(entry);
-      return false;
-    }
+  {
+    free(entry);
+    return false;
+  }
 }
 
 bool
@@ -86,6 +91,7 @@ unset_supp_mmap_entry(struct hash *supp_page_table, void *upage)
   ASSERT (entry->file != NULL);
   ASSERT (entry->state != IN_SWAP);
 
+  acquire_frame_lock();
   if (entry->state == ON_FRAME)
     {
       ASSERT (entry->kpage != NULL);
@@ -95,12 +101,13 @@ unset_supp_mmap_entry(struct hash *supp_page_table, void *upage)
               || pagedir_is_dirty(cur->pagedir, entry->kpage);
       if (dirty)
         {
-          file_write_at(entry->file, upage, entry->read_bytes, entry->offset);
+          fs_write_at(entry->file, upage, entry->read_bytes, entry->offset);
         }
 
       free_frame(entry->kpage, true);
       pagedir_clear_page(cur->pagedir, upage);
     }
+  release_frame_lock();
 
   hash_delete(supp_page_table, &entry->elem);
 }
@@ -120,45 +127,88 @@ get_supp_entry(struct hash *supp_page_table, void *upage)
 bool
 load_page(struct supp_entry *entry)
 {
-  ASSERT (entry->state != ON_FRAME);
+  ASSERT (lock_held_by_current_thread(&frame_lock));
+
+  if (entry->state == ON_FRAME)
+    return true;
+
+  ASSERT (entry->kpage == NULL);
+
+  void *kpage = allocate_frame(PAL_USER, entry->upage);
+  ASSERT (kpage != NULL)
 
   if (entry->state == IN_FILE)
-    {
-      void *kpage = allocate_frame(PAL_USER, entry->upage);
-      if (kpage == NULL)
-        return false;
+  {
+    ASSERT (entry->sid == -1)
+    ASSERT (entry->file != NULL)
 
-      entry->state = ON_FRAME;
-      entry->kpage = kpage;
-
-      ASSERT (entry->sid == -1);
-      ASSERT (entry->file != NULL);
-
-      struct thread *cur = thread_current();
-      pagedir_set_page(cur->pagedir, entry->upage, kpage, entry->writable);
-
-      lock_acquire(&fs_lock);
-      file_read_at(entry->file, kpage, entry->read_bytes, entry->offset);
-      lock_release(&fs_lock);
-
-      pagedir_set_dirty(cur->pagedir, kpage, false);
-
-      return true;
-    }
+    fs_read_at(entry->file, kpage, entry->read_bytes, entry->offset);
+  }
 
   if (entry->state == IN_SWAP)
+  {
+    ASSERT (entry->sid != -1)
+    ASSERT (entry->file == NULL)
+
+    swap_in(entry->sid, kpage);
+    entry->sid = -1;
+  }
+
+  struct thread *cur = thread_current();
+
+  if (pagedir_get_page(cur->pagedir, entry->upage) != NULL)
+    return false;
+  if (!pagedir_set_page(cur->pagedir, entry->upage, kpage, entry->writable))
+    return false;
+
+  pagedir_set_accessed(cur->pagedir, kpage, false);
+  pagedir_set_dirty(cur->pagedir, kpage, false);
+
+  entry->state = ON_FRAME;
+  entry->kpage = kpage;
+
+  unpin_frame(kpage);
+
+  return true;
+}
+
+void
+evict_page(struct supp_entry *entry, uint32_t *pagedir)
+{
+  ASSERT (lock_held_by_current_thread(&frame_lock));
+
+  ASSERT (entry->state == ON_FRAME);
+  ASSERT (entry->kpage != NULL);
+
+
+  bool dirty = pagedir_is_dirty(pagedir, entry->upage)
+               || pagedir_is_dirty(pagedir, entry->kpage);
+
+  if (entry->file == NULL)
     {
-      /* TODO */
+      entry->sid = swap_out(entry->kpage);
+      entry->state = IN_SWAP;
+    }
+  else
+    {
+      if (dirty)
+        {
+          fs_write_at(entry->file, entry->kpage,
+                      entry->read_bytes, entry->offset);
+        }
+      entry->state = IN_FILE;
     }
 
-  return false;
+  pagedir_clear_page(pagedir, entry->upage);
+  entry->kpage = NULL;
+
 }
 
 static unsigned
 supp_hash_func (const struct hash_elem *e, void *aux)
 {
   struct supp_entry *entry = hash_entry(e, struct supp_entry, elem);
-  return hash_bytes(&entry->upage, sizeof(entry->upage));
+  return hash_int((int)(entry->upage));
 }
 
 static bool
@@ -176,16 +226,19 @@ supp_destroy_func (struct hash_elem *e, void *aux)
 {
   struct supp_entry *entry = hash_entry(e, struct supp_entry, elem);
 
+  ASSERT (entry != NULL);
   ASSERT (entry->state != IN_FILE);
+  ASSERT (entry->file == NULL);
 
   if (entry->state == ON_FRAME)
     {
+      ASSERT (entry->kpage != NULL);
       free_frame(entry->kpage, false);
     }
-
-  if (entry->state == IN_SWAP)
+  else
     {
-      /* TODO */
+      ASSERT (entry->sid != -1);
+      swap_free(entry->sid);
     }
 
   free(entry);

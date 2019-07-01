@@ -3,6 +3,8 @@
 
 typedef int32_t sid_t;
 
+struct lock swap_lock;
+
 /* Initialize the swap table. */
 void swap_init();
 

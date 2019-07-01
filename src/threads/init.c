@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <filesys/filesys.h>
+#include <vm/swap.h>
 #include "devices/kbd.h"
 #include "devices/input.h"
 #include "devices/serial.h"
@@ -108,11 +110,13 @@ pintos_init (void)
   malloc_init ();
   paging_init ();
 
-  /* Initialize frame table. */
-  frame_init();
 
   /* Segmentation. */
 #ifdef USERPROG
+  /* Initialize frame table. */
+  frame_init();
+  init_fs_lock();
+
   tss_init ();
   gdt_init ();
   /* Processes */
@@ -140,6 +144,10 @@ pintos_init (void)
   ide_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
+#endif
+
+#ifdef USERPROG
+  swap_init();
 #endif
 
   printf ("Boot complete.\n");

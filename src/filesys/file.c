@@ -2,6 +2,7 @@
 #include <debug.h>
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "filesys/filesys.h"
 
 /* An open file. */
 struct file 
@@ -165,4 +166,98 @@ file_tell (struct file *file)
 {
   ASSERT (file != NULL);
   return file->pos;
+}
+
+struct file *
+fs_reopen (struct file *file)
+{
+  acquire_fs_lock();
+  struct file *f = file_reopen(file);
+  release_fs_lock();
+
+  return f;
+}
+
+void
+fs_close (struct file *file)
+{
+  acquire_fs_lock();
+  file_close(file);
+  release_fs_lock();
+}
+
+off_t
+fs_read (struct file *file, void *buffer, off_t size)
+{
+  acquire_fs_lock();
+  off_t read_bytes = file_read(file, buffer, size);
+  release_fs_lock();
+  return read_bytes;
+}
+
+off_t
+fs_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
+{
+  acquire_fs_lock();
+  off_t read_bytes = file_read_at(file, buffer, size, file_ofs);
+  release_fs_lock();
+
+  return read_bytes;
+}
+
+off_t
+fs_write (struct file *file, const void *buffer, off_t size)
+{
+  acquire_fs_lock();
+  off_t bytes_written = file_write(file, buffer, size);
+  release_fs_lock();
+
+  return bytes_written;
+}
+
+off_t
+fs_write_at (struct file *file, const void *buffer, off_t size,
+             off_t file_ofs)
+{
+  acquire_fs_lock();
+  off_t bytes_written = file_write_at(file, buffer, size, file_ofs);
+  release_fs_lock();
+
+  return bytes_written;
+}
+
+void
+fs_deny_write (struct file *file)
+{
+  acquire_fs_lock();
+  file_deny_write(file);
+  release_fs_lock();
+}
+
+void
+fs_seek (struct file *file, off_t new_pos)
+{
+  acquire_fs_lock();
+  file_seek(file, new_pos);
+  release_fs_lock();
+}
+
+off_t
+fs_tell (struct file *file)
+{
+  acquire_fs_lock();
+  off_t pos = file_tell(file);
+  release_fs_lock();
+
+  return pos;
+}
+
+off_t
+fs_length (struct file *file)
+{
+  acquire_fs_lock();
+  off_t length = file_length(file);
+  release_fs_lock();
+
+  return length;
 }
