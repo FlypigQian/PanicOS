@@ -2,6 +2,7 @@
 #include <list.h>
 #include <string.h>
 #include <stdio.h>
+#include <threads/thread.h>
 #include "devices/ide.h"
 #include "threads/malloc.h"
 

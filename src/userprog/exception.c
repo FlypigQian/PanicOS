@@ -1,12 +1,17 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <vm/frame.h>
+#include <vm/page.h>
+#include <threads/synch.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
 #include "threads/vaddr.h"
 #include "pagedir.h"
+
+#define MAX_STACK_SIZE 0x800000
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -152,21 +157,67 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   struct thread *cur = thread_current ();
-  if (fault_addr == NULL || !is_user_vaddr(fault_addr) ||
-      pagedir_get_page (cur->pagedir, fault_addr) == NULL)
+
+  void *esp = user ? f->esp : cur->user_esp;
+
+//  printf("[DEBUG]%d page_fault\n", thread_current()->tid);
+
+  if (fault_addr == NULL || !is_user_vaddr(fault_addr) || !not_present)
     {
-      thread_current ()->exitcode = -1;
+      cur->exitcode = -1;
       thread_exit ();
     }
 
+  void *upage = pg_round_down(fault_addr);
+  ASSERT (pagedir_get_page(cur->pagedir, upage) == NULL);
+  struct supp_entry *entry = get_supp_entry(&cur->supp_page_table, upage);
+  if (entry == NULL)
+    {
+      bool stack_access = (fault_addr >= esp || fault_addr == esp - 4 ||
+              fault_addr == esp - 32) && fault_addr >= esp - MAX_STACK_SIZE;
+      if (stack_access)
+        {
+          /* grow stack */
+          acquire_frame_lock();
+          void *kpage = allocate_frame(PAL_USER, upage);
+          release_frame_lock();
+          if (!pagedir_set_page(cur->pagedir, upage, kpage, true))
+            {
+              PANIC ("Can't set page in pagedir");
+            }
+          if (!set_supp_frame_entry(&cur->supp_page_table, upage, kpage, true))
+            {
+              PANIC ("Can't set page in supp_page_table");
+            }
+          return;
+        }
+      else
+        {
+          cur->exitcode = -1;
+          thread_exit ();
+          printf ("[DEBUG]%d Page fault at %p: %s error %s page in %s context.\n",
+                  thread_current()->tid,
+                  fault_addr,
+                  not_present ? "not present" : "rights violation",
+                  write ? "writing" : "reading",
+                  user ? "user" : "kernel");
+          ASSERT (false)
+        }
+    }
+  else
+    {
+      acquire_frame_lock();
+      ASSERT (entry->state != ON_FRAME);
+      bool success = load_page(entry);
+      release_frame_lock();
+      if (success)
+        return;
+    }
+
   /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
+  body, and replace it with code that brings in the page to
+  which fault_addr refers. */
+
   kill (f);
 }
 

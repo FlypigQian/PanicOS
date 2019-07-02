@@ -2,13 +2,41 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include <threads/thread.h>
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "threads/synch.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
+
+
+void
+init_fs_lock()
+{
+  lock_init(&fs_lock);
+}
+
+void
+acquire_fs_lock()
+{
+  lock_acquire(&fs_lock);
+}
+
+void
+release_fs_lock()
+{
+  lock_release(&fs_lock);
+}
+
+bool
+is_holding_fs_lock()
+{
+  return lock_held_by_current_thread(&fs_lock);
+}
+
 
 static void do_format (void);
 
@@ -100,4 +128,34 @@ do_format (void)
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
+}
+
+bool
+fs_create (const char *name, off_t initial_size)
+{
+  acquire_fs_lock();
+  bool success = filesys_create(name, initial_size);
+  release_fs_lock();
+
+  return success;
+}
+
+struct file *
+fs_open (const char *name)
+{
+  acquire_fs_lock();
+  struct file *file = filesys_open(name);
+  release_fs_lock();
+
+  return file;
+}
+
+bool
+fs_remove (const char *name)
+{
+  acquire_fs_lock();
+  bool success = filesys_remove(name);
+  release_fs_lock();
+
+  return success;
 }
